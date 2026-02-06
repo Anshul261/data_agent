@@ -1,0 +1,8 @@
+{
+  "type": "business_rule",
+  "name": "Priority Definitions and SLA Targets",
+  "description": "Priority levels and their associated SLA response and resolution targets",
+  "content": "Priority Levels:\n- P1 (Critical): System-wide outage or critical business impact. Requires immediate attention.\n- P2 (High): Major functionality impaired for a group of users. Urgent but not system-wide.\n- P3 (Medium): Standard issues affecting individual users. Most common priority level (~73% of tickets).\n- P4 (Low): Minor issues, cosmetic problems, or general inquiries.\n\nSLA Guidelines:\n- P1: Target response within 15 minutes, resolution within 4 hours\n- P2: Target response within 1 hour, resolution within 8 hours\n- P3: Target response within 4 hours, resolution within 24 hours\n- P4: Target response within 8 hours, resolution within 72 hours\n\nData Notes:\n- Priority is stored in priority__name field (values: P1, P2, P3, P4)\n- Some tickets (~12) have NULL priority - these are data quality issues\n- P3 tickets make up the vast majority of volume\n- Use is_overdue field to check SLA compliance\n- Use is_first_response_overdue to check first response SLA specifically",
+  "category": "sla",
+  "tags": ["priority", "sla", "response_time", "resolution_time"]
+}

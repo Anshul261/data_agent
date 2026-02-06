@@ -12,6 +12,10 @@ from agno.os import AgentOS
 from agno.tools import tool
 from agno.tools.reasoning import ReasoningTools
 from agno.db.sqlite import SqliteDb
+from agno.knowledge import Knowledge
+from agno.vectordb.pgvector import PgVector
+from agno.vectordb.search import SearchType
+from agno.knowledge.embedder.ollama import OllamaEmbedder
 
 print("Connecting to SQLite Memory...")
 
@@ -22,8 +26,31 @@ print("Connected to PostgreSQL Agent KB")
 db_knowledge_base_postgres_url = os.getenv("POSTGRES_URL")
 db_knowledge_base_postgres = PostgresDb(db_url=db_knowledge_base_postgres_url)
 
-
 print("Connected to PostgreSQL Knowledge Base")
+
+# Knowledge Base Setup - Ollama Embedder + PgVector
+print("Setting up Knowledge Base...")
+embedder = OllamaEmbedder(
+    id=os.getenv("EMBEDDING_MODEL", "nomic-embed-text-v2-moe"),
+    host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+    dimensions=int(os.getenv("EMBEDDING_DIMENSIONS", "768")),
+)
+
+knowledge_vector_db = PgVector(
+    table_name="ticket_analytics_kb",
+    db_url=db_knowledge_base_postgres_url,
+    embedder=embedder,
+    search_type=SearchType.hybrid,
+)
+
+ticket_knowledge = Knowledge(
+    name="ticket_analytics_knowledge",
+    description="Table schemas, validated queries, and business rules for ticket analytics",
+    vector_db=knowledge_vector_db,
+    contents_db=PostgresDb(db_url=db_knowledge_base_postgres_url),
+    max_results=5,
+)
+print("Knowledge Base configured")
 
 # Connect to ClickHouse
 print("Connecting to ClickHouse...")
@@ -171,6 +198,9 @@ ticket_agent = Agent(
     name="Ticket Analytics Agent",
     model=llm,
     db=db,
+    knowledge=ticket_knowledge,
+    search_knowledge=True,
+    add_knowledge_to_context=False,
     tools=[
         execute_clickhouse_query,
         list_all_tables,
@@ -179,17 +209,19 @@ ticket_agent = Agent(
     ],
     instructions=[
         "You are a ticket analytics expert with direct database access.",
+        "You have a knowledge base containing table schemas, validated SQL queries, and business rules.",
         "When users ask questions:",
-        "1. ALWAYS start by using list_all_tables() to see what data is available",
-        "2. Use get_table_schema(table_name) to understand the table structure",
-        "3. Use execute_clickhouse_query(sql) to run queries and get actual data",
-        "4. NEVER just describe what query you would run - ACTUALLY EXECUTE IT",
-        "5. Present the results clearly with insights and recommendations",
+        "1. FIRST search the knowledge base for relevant table schemas, validated queries, or business rules",
+        "2. Use validated queries from the knowledge base when available instead of writing new ones",
+        "3. If no matching query exists, use get_table_schema(table_name) to understand table structure",
+        "4. Use execute_clickhouse_query(sql) to run queries and get actual data",
+        "5. NEVER just describe what query you would run - ACTUALLY EXECUTE IT",
+        "6. Present the results clearly with insights and recommendations",
         "Important: You MUST call the tools to get real data. Do not make up or assume data.",
         "Always execute queries and show the actual results to the user.",
-        "Ensure to follow user format like Table then the data as a markdown table."
-        "No need to explain approach or reasoning, just provide the answer to the user's question unless user asks for it."
-        "Always use the tools to get the data and show the results to the user."
+        "Ensure to follow user format like Table then the data as a markdown table.",
+        "No need to explain approach or reasoning, just provide the answer to the user's question unless user asks for it.",
+        "Always use the tools to get the data and show the results to the user.",
     ],
     enable_agentic_memory= True,
     enable_agentic_state=True,
@@ -245,6 +277,7 @@ def main():
 agent_os = AgentOS(
     id="agentos-demo",
     agents=[ticket_agent],
+    knowledge=[ticket_knowledge],
 )
 app = agent_os.get_app()
 

@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "agno>=2.3.2",
+    "agno[ollama,pgvector]>=2.3.2",
     "aiohttp>=3.13.2",
     "anthropic>=0.75.0",
     "azure-ai-inference>=1.0.0b9",

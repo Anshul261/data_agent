@@ -1,0 +1,8 @@
+{
+  "type": "business_logic",
+  "name": "Data Quality Notes and Query Gotchas",
+  "description": "Important data quality considerations and common pitfalls when querying the ticket analytics database",
+  "content": "Database: ClickHouse (prod_tickets_2025)\n\nKey Tables:\n- prod_tickets_2025___tickets: Main tickets table (~19,374 rows)\n- technician_customer_assignments: Technician-customer mapping\n- Tables prefixed with _dlt_ are internal pipeline tables and should NOT be queried for analytics\n- Tables with 'backup' in the name are historical snapshots and should NOT be used for current analytics\n- Tables with 'staging' prefix are temporary pipeline tables\n\nColumn Naming Convention:\n- Nested objects use double underscore (__) as separator: e.g., requester__name, status__name, priority__id\n- Timestamp columns end with _ts suffix: e.g., created_time_ts, resolved_time_ts\n- Display values end with __display_value: e.g., created_time__display_value\n\nData Quality Issues:\n- ~12 tickets have NULL priority__name\n- Some tickets have NULL technician__name (unassigned)\n- time_elapsed_hours can be NULL for tickets not yet resolved\n- Always use IS NOT NULL filters when aggregating nullable columns\n- Use the _ts timestamp columns for date math, not the display_value columns\n\nClickHouse-Specific Notes:\n- Use toYear(), toMonth(), toDate() for date extraction\n- Use formatDateTime() for date formatting\n- Use quantile(0.5)() for median calculations\n- Use dateDiff('hour', start, end) for time differences\n- LIMIT is important for large result sets",
+  "category": "data_quality",
+  "tags": ["data_quality", "gotchas", "clickhouse", "column_naming"]
+}

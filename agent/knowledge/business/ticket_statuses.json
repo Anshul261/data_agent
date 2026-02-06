@@ -1,0 +1,8 @@
+{
+  "type": "business_rule",
+  "name": "Ticket Status Definitions",
+  "description": "Definitions and lifecycle of ticket statuses in ManageEngine ServiceDesk Plus",
+  "content": "Ticket Status Lifecycle:\n- Open: Newly created ticket, not yet assigned or acknowledged\n- Assigned: Ticket has been assigned to a technician but work has not started\n- In Progress: Technician is actively working on the ticket\n- Waiting for Customer: Technician needs information from the requester\n- Waiting for Vendor: Waiting on a third-party vendor for resolution\n- Waiting for parts - NOC: Waiting on NOC team for parts or infrastructure\n- Part Required: Physical parts are needed to resolve the issue\n- Onhold: Ticket is temporarily paused\n- Closed: Ticket has been resolved and closed\n- Cancelled: Ticket was cancelled before resolution\n\nKey Notes:\n- A ticket is considered 'resolved' when status is 'Closed'\n- Active/open tickets include: Open, Assigned, In Progress, Waiting for Customer, Waiting for Vendor, Part Required, Waiting for parts - NOC\n- 'Onhold' tickets should generally be excluded from SLA calculations\n- 'Cancelled' tickets should be excluded from resolution metrics",
+  "category": "ticket_lifecycle",
+  "tags": ["status", "lifecycle", "workflow"]
+}
