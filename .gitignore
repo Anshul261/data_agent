@@ -4,3 +4,4 @@
 .env
 .venv
 tmp
+__pycache__
