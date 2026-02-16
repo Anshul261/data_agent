@@ -16,6 +16,9 @@ from agno.knowledge import Knowledge
 from agno.vectordb.pgvector import PgVector
 from agno.vectordb.search import SearchType
 from agno.knowledge.embedder.ollama import OllamaEmbedder
+from tools.viz import VisualizationTools
+from fastapi import HTTPException
+from fastapi.responses import Response
 
 print("Connecting to SQLite Memory...")
 
@@ -62,6 +65,15 @@ clickhouse_client = clickhouse_connect.get_client(
     database=os.getenv("CLICKHOUSE_DATABASE", "default"),
 )
 print(f"Connected to {os.getenv('CLICKHOUSE_HOST')}")
+
+# Visualization tools setup
+print("Setting up Visualization Tools...")
+chart_base_url = os.getenv("CHART_BASE_URL", "http://localhost:7777")
+viz_tools = VisualizationTools(
+    db_path=os.getenv('AGENT_DB_FILE', './tmp/data.db'),
+    base_url=chart_base_url,
+)
+print("Visualization Tools configured")
 
 
 # Define tools for the agent
@@ -205,6 +217,7 @@ ticket_agent = Agent(
         execute_clickhouse_query,
         list_all_tables,
         get_table_schema,
+        viz_tools,
         ReasoningTools(add_instructions=True),
     ],
     instructions=[
@@ -222,6 +235,12 @@ ticket_agent = Agent(
         "Ensure to follow user format like Table then the data as a markdown table.",
         "No need to explain approach or reasoning, just provide the answer to the user's question unless user asks for it.",
         "Always use the tools to get the data and show the results to the user.",
+        "When the user asks for a chart, visualization, or graph:",
+        "1. First query the data from ClickHouse using execute_clickhouse_query",
+        "2. Then call the appropriate chart tool (create_bar_chart, create_line_chart, create_pie_chart, create_scatter_plot, or create_histogram) with the query results",
+        "3. ALWAYS include the chart in your response using markdown image syntax: ![Chart Title](chart_url)",
+        "4. Provide a brief interpretation of the chart alongside it",
+        "Choose chart types wisely: bar charts for categories, line charts for trends over time, pie charts for proportions, scatter plots for correlations, histograms for distributions.",
     ],
     enable_agentic_memory= True,
     enable_agentic_state=True,
@@ -280,6 +299,19 @@ agent_os = AgentOS(
     knowledge=[ticket_knowledge],
 )
 app = agent_os.get_app()
+
+
+@app.get("/api/charts/{chart_id}")
+async def serve_chart(chart_id: str):
+    """Serve a chart image from SQLite by its UUID."""
+    image_data = viz_tools.get_chart_bytes(chart_id)
+    if image_data is None:
+        raise HTTPException(status_code=404, detail="Chart not found")
+    return Response(
+        content=image_data,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=86400"},
+    )
 
 
 if __name__ == "__main__":
