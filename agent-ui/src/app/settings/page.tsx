@@ -10,6 +10,7 @@ import { useQueryState } from 'nuqs'
 import { truncateText } from '@/lib/utils'
 import useChatActions from '@/hooks/useChatActions'
 import { useRouter } from 'next/navigation'
+import { APIRoutes } from '@/api/routes'
 
 const ENDPOINT_PLACEHOLDER = 'NO ENDPOINT ADDED'
 
@@ -39,6 +40,9 @@ export default function SettingsPage() {
   const [isEditingToken, setIsEditingToken] = useState(false)
   const [tokenValue, setTokenValue] = useState('')
   const [isTokenHovering, setIsTokenHovering] = useState(false)
+
+  // Knowledge Base state
+  const [isLoadingKnowledge, setIsLoadingKnowledge] = useState(false)
 
   const [isMounted, setIsMounted] = useState(false)
 
@@ -122,6 +126,44 @@ export default function SettingsPage() {
   const displayTokenValue = authToken
     ? `${'*'.repeat(Math.min(authToken.length, 20))}${authToken.length > 20 ? '...' : ''}`
     : 'NO TOKEN SET'
+
+  // Knowledge Base handler
+  const handleLoadKnowledge = async () => {
+    if (!selectedEndpoint) {
+      toast.error('No endpoint configured')
+      return
+    }
+
+    setIsLoadingKnowledge(true)
+    try {
+      const response = await fetch(APIRoutes.LoadKnowledge(selectedEndpoint), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+        }
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const data = await response.json()
+
+      if (data.errors && data.errors.length > 0) {
+        toast.error(`Loaded ${data.loaded} files, ${data.errors.length} errors`)
+      } else if (data.skipped > 0 && data.loaded === 0) {
+        toast.info(`All ${data.total} files already loaded (skipped)`)
+      } else {
+        toast.success(`Loaded ${data.loaded} of ${data.total} knowledge files`)
+      }
+    } catch (error) {
+      toast.error('Failed to load knowledge base')
+      console.error('Error loading knowledge:', error)
+    } finally {
+      setIsLoadingKnowledge(false)
+    }
+  }
 
   return (
     <div className="flex h-screen w-full flex-col bg-background font-dmmono">
@@ -348,6 +390,41 @@ export default function SettingsPage() {
                 )}
               </div>
             )}
+          </div>
+
+          {/* Knowledge Base Section */}
+          <div className="space-y-4 rounded-xl border border-primary/15 bg-accent/30 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-medium text-foreground">
+                  Knowledge Base
+                </h2>
+                <p className="text-sm text-muted">
+                  Load table schemas, queries, and business rules into the vector database
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={handleLoadKnowledge}
+                disabled={isLoadingKnowledge || !selectedEndpoint}
+                className="flex items-center gap-2"
+              >
+                {isLoadingKnowledge ? (
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  >
+                    <Icon type="refresh" size="sm" />
+                  </motion.div>
+                ) : (
+                  <Icon type="download" size="sm" />
+                )}
+                Load Knowledge
+              </Button>
+            </div>
           </div>
         </div>
       </div>

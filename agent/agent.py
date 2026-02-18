@@ -314,5 +314,41 @@ async def serve_chart(chart_id: str):
     )
 
 
+@app.post("/api/knowledge/load")
+async def load_knowledge():
+    """
+    Load knowledge files (table schemas, SQL queries, business rules) into the vector database.
+    Uses deduplication via skip_if_exists=True to prevent re-uploading already loaded files.
+    """
+    from pathlib import Path
+
+    knowledge_dir = Path(__file__).parent / "knowledge"
+    files = []
+
+    for pattern in ["tables/*.json", "queries/*.sql", "business/*.json"]:
+        files.extend(sorted(knowledge_dir.glob(pattern)))
+
+    loaded, errors = 0, []
+
+    for f in files:
+        try:
+            await ticket_knowledge.add_content_async(
+                path=str(f),
+                name=f.stem,
+                upsert=True,
+                skip_if_exists=True,
+            )
+            loaded += 1
+        except Exception as e:
+            errors.append({"file": f.name, "error": str(e)})
+
+    return {
+        "loaded": loaded,
+        "errors": errors,
+        "total": len(files),
+        "skipped": len(files) - loaded - len(errors)
+    }
+
+
 if __name__ == "__main__":
     agent_os.serve(app="agent:app", port=7777)
