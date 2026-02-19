@@ -43,6 +43,8 @@ export default function SettingsPage() {
 
   // Knowledge Base state
   const [isLoadingKnowledge, setIsLoadingKnowledge] = useState(false)
+  const [isDeletingKnowledge, setIsDeletingKnowledge] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
 
   const [isMounted, setIsMounted] = useState(false)
 
@@ -162,6 +164,33 @@ export default function SettingsPage() {
       console.error('Error loading knowledge:', error)
     } finally {
       setIsLoadingKnowledge(false)
+    }
+  }
+
+  const handleClearKnowledge = async () => {
+    if (!confirmClear) {
+      setConfirmClear(true)
+      return
+    }
+    setIsDeletingKnowledge(true)
+    setConfirmClear(false)
+    try {
+      const response = await fetch(
+        `${selectedEndpoint}/api/knowledge`,
+        {
+          method: 'DELETE',
+          headers: {
+            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
+          }
+        }
+      )
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      toast.success('Knowledge base cleared')
+    } catch (error) {
+      toast.error('Failed to clear knowledge base')
+      console.error('Error clearing knowledge:', error)
+    } finally {
+      setIsDeletingKnowledge(false)
     }
   }
 
@@ -409,7 +438,7 @@ export default function SettingsPage() {
               <Button
                 variant="outline"
                 onClick={handleLoadKnowledge}
-                disabled={isLoadingKnowledge || !selectedEndpoint}
+                disabled={isLoadingKnowledge || isDeletingKnowledge || !selectedEndpoint}
                 className="flex items-center gap-2"
               >
                 {isLoadingKnowledge ? (
@@ -423,6 +452,29 @@ export default function SettingsPage() {
                   <Icon type="download" size="sm" />
                 )}
                 Load Knowledge
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={handleClearKnowledge}
+                disabled={isLoadingKnowledge || isDeletingKnowledge || !selectedEndpoint}
+                className={`flex items-center gap-2 transition-colors ${
+                  confirmClear
+                    ? 'border border-destructive text-destructive hover:bg-destructive/10'
+                    : 'text-muted hover:text-destructive'
+                }`}
+                onBlur={() => setConfirmClear(false)}
+              >
+                {isDeletingKnowledge ? (
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                  >
+                    <Icon type="refresh" size="sm" />
+                  </motion.div>
+                ) : (
+                  <Icon type="trash" size="sm" />
+                )}
+                {confirmClear ? 'Confirm Clear?' : 'Clear KB'}
               </Button>
             </div>
           </div>

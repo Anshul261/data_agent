@@ -1,10 +1,11 @@
 'use client'
 
-import { FC, useState } from 'react'
+import { FC, useState, useCallback } from 'react'
 
 import Image from 'next/image'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import { useStore } from '@/store'
 
 import type {
   UnorderedListProps,
@@ -175,43 +176,165 @@ const Heading6 = ({ className, ...props }: HeadingProps) => (
   />
 )
 
+// ─── Chart Image with Download ───────────────────────────────────────────────
+
+const DownloadIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="7 10 12 15 17 10" />
+    <line x1="12" y1="15" x2="12" y2="3" />
+  </svg>
+)
+
+const EditIcon = () => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+  </svg>
+)
+
 const Img = ({ src, alt }: ImgProps) => {
   const [error, setError] = useState(false)
+  const [downloading, setDownloading] = useState(false)
+  const { chatInputRef } = useStore()
 
-  if (!src) return null
+  const strSrc = typeof src === 'string' ? src : null
+
+  const handleDownload = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault()
+      if (!strSrc || downloading) return
+      setDownloading(true)
+      try {
+        const res = await fetch(strSrc)
+        const blob = await res.blob()
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = (alt || 'chart') + '.png'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      } catch {
+        window.open(strSrc, '_blank')
+      } finally {
+        setDownloading(false)
+      }
+    },
+    [strSrc, alt, downloading]
+  )
+
+  const handleModify = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault()
+      const el = chatInputRef?.current
+      if (!el) return
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        'value'
+      )?.set
+      nativeSetter?.call(el, 'Update this chart to ')
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.focus()
+      // place cursor at end
+      const len = el.value.length
+      el.setSelectionRange(len, len)
+    },
+    [chatInputRef]
+  )
+
+  if (!strSrc) return null
 
   return (
-    <div className="w-full max-w-xl">
+    <div className="group relative w-full max-w-xl">
       {error ? (
         <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-md bg-secondary/50 text-muted">
           <Paragraph className="text-primary">Image unavailable</Paragraph>
           <Link
-            href={src}
+            href={strSrc}
             target="_blank"
             className="max-w-md truncate underline"
           >
-            {src}
+            {strSrc}
           </Link>
         </div>
       ) : (
-        <Image
-          src={src}
-          width={1280}
-          height={720}
-          alt={alt ?? 'Rendered image'}
-          className="size-full rounded-md object-cover"
-          onError={() => setError(true)}
-          unoptimized
-        />
+        <>
+          <Image
+            src={strSrc}
+            width={1280}
+            height={720}
+            alt={alt ?? 'Rendered image'}
+            className="size-full rounded-md object-cover"
+            onError={() => setError(true)}
+            unoptimized
+          />
+          <div className="absolute bottom-2 right-2 flex items-center gap-1.5 opacity-0 transition-all duration-150 group-hover:opacity-100">
+            <button
+              onClick={handleModify}
+              title="Modify chart"
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1.5',
+                'border border-primary/20 bg-background/85 backdrop-blur-sm',
+                'text-xs font-medium text-primary/80',
+                'hover:border-primary/40 hover:bg-background hover:text-primary'
+              )}
+            >
+              <EditIcon />
+              Modify
+            </button>
+            <button
+              onClick={handleDownload}
+              disabled={downloading}
+              title="Download chart"
+              className={cn(
+                'flex items-center gap-1.5 rounded-md px-2.5 py-1.5',
+                'border border-primary/20 bg-background/85 backdrop-blur-sm',
+                'text-xs font-medium text-primary/80',
+                'hover:border-primary/40 hover:bg-background hover:text-primary',
+                'disabled:cursor-not-allowed disabled:opacity-50'
+              )}
+            >
+              <DownloadIcon />
+              {downloading ? 'Saving…' : 'Download'}
+            </button>
+          </div>
+        </>
       )}
     </div>
   )
 }
 
-const Table = ({ className, ...props }: TableProps) => (
-  <div className="w-full max-w-[560px] overflow-hidden rounded-md border border-border">
-    <div className="w-full overflow-x-auto">
-      <table className={cn(className, 'w-full')} {...filterProps(props)} />
+// ─── Enhanced Data Table ──────────────────────────────────────────────────────
+
+const Table = ({ className, children, ...props }: TableProps) => (
+  <div className="my-1 w-full overflow-hidden rounded-lg border border-primary/15">
+    <div className="max-h-[480px] w-full overflow-auto">
+      <table
+        className={cn(className, 'w-full min-w-full border-collapse')}
+        {...filterProps({ ...props, children })}
+      />
     </div>
   </div>
 )
@@ -220,7 +343,8 @@ const TableHead = ({ className, ...props }: TableHeaderProps) => (
   <thead
     className={cn(
       className,
-      'rounded-md border-b border-border bg-transparent p-2 text-left text-sm font-[600]'
+      'sticky top-0 z-10 border-b border-primary/15',
+      'bg-background/95 backdrop-blur-sm'
     )}
     {...filterProps(props)}
   />
@@ -228,25 +352,39 @@ const TableHead = ({ className, ...props }: TableHeaderProps) => (
 
 const TableHeadCell = ({ className, ...props }: TableHeaderCellProps) => (
   <th
-    className={cn(className, 'p-2 text-sm font-[600]')}
+    className={cn(
+      className,
+      'whitespace-nowrap px-3 py-2.5 text-left',
+      'text-xs font-semibold uppercase tracking-wider text-primary/60',
+      'border-r border-primary/10 last:border-r-0'
+    )}
     {...filterProps(props)}
   />
 )
 
 const TableBody = ({ className, ...props }: TableBodyProps) => (
-  <tbody className={cn(className, 'text-xs')} {...filterProps(props)} />
+  <tbody className={cn(className, 'divide-y divide-primary/8')} {...filterProps(props)} />
 )
 
 const TableRow = ({ className, ...props }: TableRowProps) => (
   <tr
-    className={cn(className, 'border-b border-border last:border-b-0')}
+    className={cn(
+      className,
+      'transition-colors duration-75',
+      'odd:bg-transparent even:bg-primary/[0.03]',
+      'hover:bg-primary/[0.06]'
+    )}
     {...filterProps(props)}
   />
 )
 
 const TableCell = ({ className, ...props }: TableCellProps) => (
   <td
-    className={cn(className, 'whitespace-nowrap p-2 font-[400]')}
+    className={cn(
+      className,
+      'whitespace-nowrap px-3 py-2 text-xs text-secondary/85',
+      'border-r border-primary/8 last:border-r-0'
+    )}
     {...filterProps(props)}
   />
 )
