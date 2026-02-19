@@ -241,6 +241,11 @@ ticket_agent = Agent(
         "3. ALWAYS include the chart in your response using markdown image syntax: ![Chart Title](chart_url)",
         "4. Provide a brief interpretation of the chart alongside it",
         "Choose chart types wisely: bar charts for categories, line charts for trends over time, pie charts for proportions, scatter plots for correlations, histograms for distributions.",
+        "When the user asks to modify or update a previous chart (e.g. 'make it a pie chart', 'show only last 6 months', 'sort by count', 'add more categories'):",
+        "1. Check the conversation history for the data that was already queried",
+        "2. If the same data can be reused with a different chart type or parameters, call the new chart tool directly with that data — do NOT re-query ClickHouse",
+        "3. If the modification requires different or filtered data (e.g. different time range, different grouping), run a new query first",
+        "4. Always embed the updated chart with ![Chart Title](chart_url) and briefly note what changed",
     ],
     enable_agentic_memory= True,
     enable_agentic_state=True,
@@ -312,6 +317,17 @@ async def serve_chart(chart_id: str):
         media_type="image/png",
         headers={"Cache-Control": "public, max-age=86400"},
     )
+
+
+@app.delete("/api/knowledge")
+async def delete_knowledge():
+    """Clear all documents from the knowledge base vector store."""
+    try:
+        knowledge_vector_db.delete_table()
+        knowledge_vector_db.create()
+        return {"status": "success", "message": "Knowledge base cleared"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/knowledge/load")
