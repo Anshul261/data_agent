@@ -84,7 +84,7 @@ export const useStore = create<Store>()(
       selectedEndpoint: 'http://localhost:7777',
       setSelectedEndpoint: (selectedEndpoint) =>
         set(() => ({ selectedEndpoint })),
-      authToken: '',
+      authToken: process.env.NEXT_PUBLIC_AUTH_TOKEN ?? '',
       setAuthToken: (authToken) => set(() => ({ authToken })),
       agents: [],
       setAgents: (agents) => set({ agents }),

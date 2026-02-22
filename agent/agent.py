@@ -1,14 +1,17 @@
 import os
+from datetime import UTC, datetime, timedelta
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 import clickhouse_connect
+import jwt
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
 from agno.models.azure import AzureOpenAI
 from agno.os import AgentOS
+from agno.os.middleware.jwt import JWTMiddleware
 from agno.tools import tool
 from agno.tools.reasoning import ReasoningTools
 from agno.db.sqlite import SqliteDb
@@ -18,7 +21,18 @@ from agno.vectordb.search import SearchType
 from agno.knowledge.embedder.ollama import OllamaEmbedder
 from tools.viz import VisualizationTools
 from fastapi import HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+
+# JWT configuration - read from env, warn if missing
+JWT_SECRET = os.getenv("JWT_SECRET")
+JWT_ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
+
+if not JWT_SECRET:
+    raise RuntimeError(
+        "JWT_SECRET environment variable is required. "
+        "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+    )
 
 print("Connecting to SQLite Memory...")
 
@@ -305,6 +319,54 @@ agent_os = AgentOS(
 )
 app = agent_os.get_app()
 
+# Agno's get_app() adds its own CORSMiddleware internally.
+# Having two CORS middlewares can produce conflicting headers and confuse
+# the browser's preflight check.  Remove it before building our stack.
+app.user_middleware = [m for m in app.user_middleware if m.cls is not CORSMiddleware]
+app.middleware_stack = None  # force rebuild on next request
+
+# Middleware stack is LIFO: last added = outermost = runs first.
+#
+# Final request order:  CORSMiddleware → JWTMiddleware → route handler
+#
+# CORSMiddleware (outermost) responds to OPTIONS preflight requests
+# with the correct Allow-Origin headers before JWT ever sees them.
+# JWTMiddleware then validates the token on every non-OPTIONS request.
+app.add_middleware(
+    JWTMiddleware,
+    secret_key=JWT_SECRET,
+    algorithm=JWT_ALGORITHM,
+    excluded_route_paths=[
+        "/health",
+        "/docs",
+        "/docs/*",
+        "/docs/oauth2-redirect",
+        "/redoc",
+        "/openapi.json",
+        "/api/charts/*",
+    ],
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+print("Middleware stack (outermost → innermost):", [m.cls.__name__ for m in reversed(app.user_middleware)])
+
+
+def generate_token(sub: str = "user", scopes: list[str] | None = None, hours: int = 24) -> str:
+    """Generate a signed JWT token for testing / bootstrapping."""
+    payload = {
+        "sub": sub,
+        "scopes": scopes or ["agents:read", "agents:run", "sessions:read", "sessions:write"],
+        "iat": datetime.now(UTC),
+        "exp": datetime.now(UTC) + timedelta(hours=hours),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
 
 @app.get("/api/charts/{chart_id}")
 async def serve_chart(chart_id: str):
@@ -367,4 +429,12 @@ async def load_knowledge():
 
 
 if __name__ == "__main__":
+    token = generate_token(sub="admin", scopes=["agent_os:admin"])
+    print("\n" + "=" * 60)
+    print("JWT Authentication ENABLED")
+    print("=" * 60)
+    print(f"\nAlgorithm : {JWT_ALGORITHM}")
+    print(f"\nTest token (24h, admin):\n{token}")
+    print("\nPaste this token into Settings > Authentication Token in the UI.")
+    print("=" * 60 + "\n")
     agent_os.serve(app="agent:app", port=7777)

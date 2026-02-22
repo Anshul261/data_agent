@@ -48,6 +48,9 @@ export default function SettingsPage() {
 
   const [isMounted, setIsMounted] = useState(false)
 
+  const envToken = process.env.NEXT_PUBLIC_AUTH_TOKEN ?? ''
+  const isUsingEnvToken = isMounted && authToken === envToken && !!envToken
+
   useEffect(() => {
     setEndpointValue(selectedEndpoint)
     setTokenValue(authToken)
@@ -333,9 +336,16 @@ export default function SettingsPage() {
                   Authentication Token
                 </h2>
                 <p className="text-sm text-muted">
-                  Optional bearer token for API authentication
+                  {isUsingEnvToken
+                    ? 'Auto-loaded from NEXT_PUBLIC_AUTH_TOKEN'
+                    : 'Bearer token for API authentication'}
                 </p>
               </div>
+              {isUsingEnvToken && (
+                <span className="rounded-lg border border-positive/30 bg-positive/10 px-2 py-1 text-xs font-medium text-positive">
+                  ENV
+                </span>
+              )}
             </div>
 
             {isEditingToken ? (
@@ -406,17 +416,30 @@ export default function SettingsPage() {
                     )}
                   </AnimatePresence>
                 </motion.div>
-                {authToken && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={handleClearToken}
-                    className="hover:bg-accent"
-                    title="Clear token"
-                  >
-                    <Icon type="trash" size="sm" />
-                  </Button>
-                )}
+                <div className="flex items-center gap-1">
+                  {envToken && !isUsingEnvToken && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { setAuthToken(envToken); setTokenValue(envToken); toast.success('Reset to env token') }}
+                      className="hover:bg-accent"
+                      title="Reset to env token"
+                    >
+                      <Icon type="refresh" size="sm" />
+                    </Button>
+                  )}
+                  {authToken && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={handleClearToken}
+                      className="hover:bg-accent"
+                      title="Clear token"
+                    >
+                      <Icon type="trash" size="sm" />
+                    </Button>
+                  )}
+                </div>
               </div>
             )}
           </div>
