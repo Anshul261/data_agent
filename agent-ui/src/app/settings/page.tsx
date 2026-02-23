@@ -11,11 +11,14 @@ import { truncateText } from '@/lib/utils'
 import useChatActions from '@/hooks/useChatActions'
 import { useRouter } from 'next/navigation'
 import { APIRoutes } from '@/api/routes'
+import { useAuthGuard } from '@/hooks/useAuthGuard'
 
 const ENDPOINT_PLACEHOLDER = 'NO ENDPOINT ADDED'
 
 export default function SettingsPage() {
   const router = useRouter()
+  useAuthGuard()
+
   const {
     selectedEndpoint,
     isEndpointActive,
@@ -24,11 +27,12 @@ export default function SettingsPage() {
     setSessionsData,
     setMessages,
     authToken,
-    setAuthToken
+    username,
+    userRole,
+    logout
   } = useStore()
   const { initialize } = useChatActions()
 
-  // Endpoint state
   const [isEditingEndpoint, setIsEditingEndpoint] = useState(false)
   const [endpointValue, setEndpointValue] = useState('')
   const [isEndpointHovering, setIsEndpointHovering] = useState(false)
@@ -36,31 +40,20 @@ export default function SettingsPage() {
   const [, setAgentId] = useQueryState('agent')
   const [, setSessionId] = useQueryState('session')
 
-  // Auth Token state
-  const [isEditingToken, setIsEditingToken] = useState(false)
-  const [tokenValue, setTokenValue] = useState('')
-  const [isTokenHovering, setIsTokenHovering] = useState(false)
-
-  // Knowledge Base state
   const [isLoadingKnowledge, setIsLoadingKnowledge] = useState(false)
   const [isDeletingKnowledge, setIsDeletingKnowledge] = useState(false)
   const [confirmClear, setConfirmClear] = useState(false)
 
   const [isMounted, setIsMounted] = useState(false)
 
-  const envToken = process.env.NEXT_PUBLIC_AUTH_TOKEN ?? ''
-  const isUsingEnvToken = isMounted && authToken === envToken && !!envToken
-
   useEffect(() => {
     setEndpointValue(selectedEndpoint)
-    setTokenValue(authToken)
     setIsMounted(true)
-  }, [selectedEndpoint, authToken])
+  }, [selectedEndpoint])
 
   const getStatusColor = (isActive: boolean) =>
     isActive ? 'bg-positive' : 'bg-destructive'
 
-  // Endpoint handlers
   const handleSaveEndpoint = async () => {
     if (!isValidUrl(endpointValue)) {
       toast.error('Please enter a valid URL')
@@ -99,62 +92,27 @@ export default function SettingsPage() {
     toast.success('Connection refreshed')
   }
 
-  // Auth Token handlers
-  const handleSaveToken = () => {
-    const cleanToken = tokenValue.trim()
-    setAuthToken(cleanToken)
-    setIsEditingToken(false)
-    setIsTokenHovering(false)
-    toast.success('Auth token updated')
+  const handleLogout = () => {
+    logout()
+    router.replace('/login')
   }
 
-  const handleCancelToken = () => {
-    setTokenValue(authToken)
-    setIsEditingToken(false)
-    setIsTokenHovering(false)
-  }
-
-  const handleTokenKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
-      handleSaveToken()
-    } else if (e.key === 'Escape') {
-      handleCancelToken()
-    }
-  }
-
-  const handleClearToken = () => {
-    setAuthToken('')
-    setTokenValue('')
-    toast.success('Auth token cleared')
-  }
-
-  const displayTokenValue = authToken
-    ? `${'*'.repeat(Math.min(authToken.length, 20))}${authToken.length > 20 ? '...' : ''}`
-    : 'NO TOKEN SET'
-
-  // Knowledge Base handler
   const handleLoadKnowledge = async () => {
     if (!selectedEndpoint) {
       toast.error('No endpoint configured')
       return
     }
-
     setIsLoadingKnowledge(true)
     try {
       const response = await fetch(APIRoutes.LoadKnowledge(selectedEndpoint), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+          Authorization: `Bearer ${authToken}`
         }
       })
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
-      }
-
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
       const data = await response.json()
-
       if (data.errors && data.errors.length > 0) {
         toast.error(`Loaded ${data.loaded} files, ${data.errors.length} errors`)
       } else if (data.skipped > 0 && data.loaded === 0) {
@@ -178,15 +136,10 @@ export default function SettingsPage() {
     setIsDeletingKnowledge(true)
     setConfirmClear(false)
     try {
-      const response = await fetch(
-        `${selectedEndpoint}/api/knowledge`,
-        {
-          method: 'DELETE',
-          headers: {
-            ...(authToken ? { Authorization: `Bearer ${authToken}` } : {})
-          }
-        }
-      )
+      const response = await fetch(`${selectedEndpoint}/api/knowledge`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${authToken}` }
+      })
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
       toast.success('Knowledge base cleared')
     } catch (error) {
@@ -212,9 +165,7 @@ export default function SettingsPage() {
           </Button>
           <div>
             <h1 className="text-xl font-medium text-foreground">Settings</h1>
-            <p className="text-sm text-muted">
-              Configure your API connection and authentication
-            </p>
+            <p className="text-sm text-muted">Configure your API connection</p>
           </div>
         </div>
       </div>
@@ -222,7 +173,40 @@ export default function SettingsPage() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-6">
         <div className="mx-auto max-w-2xl space-y-8">
-          {/* API Endpoint Section */}
+
+          {/* User Info */}
+          <div className="flex items-center justify-between rounded-xl border border-primary/15 bg-accent/30 px-6 py-4">
+            <div className="flex items-center gap-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-xs font-medium uppercase text-primary">
+                {username ? username[0] : '?'}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {username || 'Unknown user'}
+                </p>
+                {userRole && (
+                  <span
+                    className={`text-xs font-medium ${
+                      userRole === 'admin' ? 'text-primary' : 'text-muted'
+                    }`}
+                  >
+                    {userRole}
+                  </span>
+                )}
+              </div>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-xs text-muted hover:text-destructive"
+            >
+              <Icon type="x" size="xs" />
+              Logout
+            </Button>
+          </div>
+
+          {/* API Endpoint */}
           <div className="space-y-4 rounded-xl border border-primary/15 bg-accent/30 p-6">
             <div className="flex items-center justify-between">
               <div>
@@ -328,179 +312,80 @@ export default function SettingsPage() {
             )}
           </div>
 
-          {/* Auth Token Section */}
-          <div className="space-y-4 rounded-xl border border-primary/15 bg-accent/30 p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-medium text-foreground">
-                  Authentication Token
-                </h2>
-                <p className="text-sm text-muted">
-                  {isUsingEnvToken
-                    ? 'Auto-loaded from NEXT_PUBLIC_AUTH_TOKEN'
-                    : 'Bearer token for API authentication'}
-                </p>
-              </div>
-              {isUsingEnvToken && (
-                <span className="rounded-lg border border-positive/30 bg-positive/10 px-2 py-1 text-xs font-medium text-positive">
-                  ENV
-                </span>
-              )}
-            </div>
-
-            {isEditingToken ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="password"
-                  value={tokenValue}
-                  onChange={(e) => setTokenValue(e.target.value)}
-                  onKeyDown={handleTokenKeyDown}
-                  placeholder="Enter authentication token..."
-                  className="flex h-11 w-full items-center rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50"
-                  autoFocus
-                />
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleSaveToken}
-                  className="hover:bg-accent"
-                  title="Save"
-                >
-                  <Icon type="save" size="sm" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={handleCancelToken}
-                  className="hover:bg-accent"
-                  title="Cancel"
-                >
-                  <Icon type="x" size="sm" />
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <motion.div
-                  className="relative flex h-11 w-full cursor-pointer items-center justify-between rounded-xl border border-primary/15 bg-background px-4"
-                  onMouseEnter={() => setIsTokenHovering(true)}
-                  onMouseLeave={() => setIsTokenHovering(false)}
-                  onClick={() => setIsEditingToken(true)}
-                  whileHover={{ scale: 1.01 }}
-                  transition={{ type: 'spring', stiffness: 400, damping: 10 }}
-                >
-                  <AnimatePresence mode="wait">
-                    {isTokenHovering ? (
-                      <motion.div
-                        key="token-hover"
-                        className="absolute inset-0 flex items-center justify-center"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        <p className="flex items-center gap-2 text-sm font-medium text-primary">
-                          <Icon type="edit" size="xs" /> Click to edit
-                        </p>
-                      </motion.div>
-                    ) : (
-                      <motion.p
-                        key="token-value"
-                        className="text-sm font-medium text-foreground"
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                      >
-                        {isMounted ? displayTokenValue : 'NO TOKEN SET'}
-                      </motion.p>
-                    )}
-                  </AnimatePresence>
-                </motion.div>
-                <div className="flex items-center gap-1">
-                  {envToken && !isUsingEnvToken && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => { setAuthToken(envToken); setTokenValue(envToken); toast.success('Reset to env token') }}
-                      className="hover:bg-accent"
-                      title="Reset to env token"
-                    >
-                      <Icon type="refresh" size="sm" />
-                    </Button>
-                  )}
-                  {authToken && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={handleClearToken}
-                      className="hover:bg-accent"
-                      title="Clear token"
-                    >
-                      <Icon type="trash" size="sm" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Knowledge Base Section */}
-          <div className="space-y-4 rounded-xl border border-primary/15 bg-accent/30 p-6">
-            <div className="flex items-center justify-between">
+          {/* Knowledge Base — admin only */}
+          {userRole === 'admin' && (
+            <div className="space-y-4 rounded-xl border border-primary/15 bg-accent/30 p-6">
               <div>
                 <h2 className="text-lg font-medium text-foreground">
                   Knowledge Base
                 </h2>
                 <p className="text-sm text-muted">
-                  Load table schemas, queries, and business rules into the vector database
+                  Load table schemas, queries, and business rules into the
+                  vector database
                 </p>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={handleLoadKnowledge}
-                disabled={isLoadingKnowledge || isDeletingKnowledge || !selectedEndpoint}
-                className="flex items-center gap-2"
-              >
-                {isLoadingKnowledge ? (
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                  >
-                    <Icon type="refresh" size="sm" />
-                  </motion.div>
-                ) : (
-                  <Icon type="download" size="sm" />
-                )}
-                Load Knowledge
-              </Button>
-              <Button
-                variant="ghost"
-                onClick={handleClearKnowledge}
-                disabled={isLoadingKnowledge || isDeletingKnowledge || !selectedEndpoint}
-                className={`flex items-center gap-2 transition-colors ${
-                  confirmClear
-                    ? 'border border-destructive text-destructive hover:bg-destructive/10'
-                    : 'text-muted hover:text-destructive'
-                }`}
-                onBlur={() => setConfirmClear(false)}
-              >
-                {isDeletingKnowledge ? (
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                  >
-                    <Icon type="refresh" size="sm" />
-                  </motion.div>
-                ) : (
-                  <Icon type="trash" size="sm" />
-                )}
-                {confirmClear ? 'Confirm Clear?' : 'Clear KB'}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={handleLoadKnowledge}
+                  disabled={
+                    isLoadingKnowledge ||
+                    isDeletingKnowledge ||
+                    !selectedEndpoint
+                  }
+                  className="flex items-center gap-2"
+                >
+                  {isLoadingKnowledge ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{
+                        duration: 1,
+                        repeat: Infinity,
+                        ease: 'linear'
+                      }}
+                    >
+                      <Icon type="refresh" size="sm" />
+                    </motion.div>
+                  ) : (
+                    <Icon type="download" size="sm" />
+                  )}
+                  Load Knowledge
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={handleClearKnowledge}
+                  disabled={
+                    isLoadingKnowledge ||
+                    isDeletingKnowledge ||
+                    !selectedEndpoint
+                  }
+                  className={`flex items-center gap-2 transition-colors ${
+                    confirmClear
+                      ? 'border border-destructive text-destructive hover:bg-destructive/10'
+                      : 'text-muted hover:text-destructive'
+                  }`}
+                  onBlur={() => setConfirmClear(false)}
+                >
+                  {isDeletingKnowledge ? (
+                    <motion.div
+                      animate={{ rotate: 360 }}
+                      transition={{
+                        duration: 1,
+                        repeat: Infinity,
+                        ease: 'linear'
+                      }}
+                    >
+                      <Icon type="refresh" size="sm" />
+                    </motion.div>
+                  ) : (
+                    <Icon type="trash" size="sm" />
+                  )}
+                  {confirmClear ? 'Confirm Clear?' : 'Clear KB'}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

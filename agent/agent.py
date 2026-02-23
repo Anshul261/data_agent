@@ -20,9 +20,11 @@ from agno.vectordb.pgvector import PgVector
 from agno.vectordb.search import SearchType
 from agno.knowledge.embedder.ollama import OllamaEmbedder
 from tools.viz import VisualizationTools
-from fastapi import HTTPException
+import auth as auth_utils
+from fastapi import HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 # JWT configuration - read from env, warn if missing
 JWT_SECRET = os.getenv("JWT_SECRET")
@@ -44,6 +46,9 @@ db_knowledge_base_postgres_url = os.getenv("POSTGRES_URL")
 db_knowledge_base_postgres = PostgresDb(db_url=db_knowledge_base_postgres_url)
 
 print("Connected to PostgreSQL Knowledge Base")
+
+# Ensure users table exists
+auth_utils.ensure_users_table(db_knowledge_base_postgres_url)
 
 # Knowledge Base Setup - Ollama Embedder + PgVector
 print("Setting up Knowledge Base...")
@@ -344,6 +349,8 @@ app.add_middleware(
         "/redoc",
         "/openapi.json",
         "/api/charts/*",
+        "/auth/login",
+        "/auth/bootstrap",
     ],
 )
 app.add_middleware(
@@ -362,10 +369,50 @@ def generate_token(sub: str = "user", scopes: list[str] | None = None, hours: in
     payload = {
         "sub": sub,
         "scopes": scopes or ["agents:read", "agents:run", "sessions:read", "sessions:write"],
-        "iat": datetime.now(UTC),
+        "iat": datetime.now(UTC) - timedelta(seconds=30),
         "exp": datetime.now(UTC) + timedelta(hours=hours),
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class BootstrapRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/auth/login")
+async def login(req: LoginRequest):
+    """Authenticate a user and return a JWT."""
+    user = auth_utils.get_user(req.username, db_knowledge_base_postgres_url)
+    if not user or not auth_utils.verify_password(req.password, user["hashed_password"]):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+
+    scopes = (
+        ["agent_os:admin"]
+        if user["role"] == "admin"
+        else ["agents:run", "sessions:read", "sessions:write"]
+    )
+    token = generate_token(sub=user["id"], scopes=scopes, hours=8)
+    return {
+        "access_token": token,
+        "token_type": "bearer",
+        "username": user["username"],
+        "role": user["role"],
+    }
+
+
+@app.post("/auth/bootstrap")
+async def bootstrap_admin(req: BootstrapRequest):
+    """Seed the first admin user. Only works when no admin exists yet."""
+    if auth_utils.admin_exists(db_knowledge_base_postgres_url):
+        raise HTTPException(status_code=409, detail="An admin user already exists")
+    user = auth_utils.create_user(req.username, req.password, "admin", db_knowledge_base_postgres_url)
+    return {"message": "Admin user created", "username": user["username"]}
 
 
 @app.get("/api/charts/{chart_id}")
@@ -429,12 +476,11 @@ async def load_knowledge():
 
 
 if __name__ == "__main__":
-    token = generate_token(sub="admin", scopes=["agent_os:admin"])
     print("\n" + "=" * 60)
-    print("JWT Authentication ENABLED")
+    print("Ticket Analytics Agent")
     print("=" * 60)
-    print(f"\nAlgorithm : {JWT_ALGORITHM}")
-    print(f"\nTest token (24h, admin):\n{token}")
-    print("\nPaste this token into Settings > Authentication Token in the UI.")
+    print(f"\nJWT Algorithm : {JWT_ALGORITHM}")
+    print("\nFirst-time setup: POST /auth/bootstrap to create the admin user")
+    print("Then log in at http://localhost:3000/login")
     print("=" * 60 + "\n")
     agent_os.serve(app="agent:app", port=7777)

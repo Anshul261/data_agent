@@ -38,6 +38,11 @@ interface Store {
   setSelectedEndpoint: (selectedEndpoint: string) => void
   authToken: string
   setAuthToken: (authToken: string) => void
+  username: string
+  setUsername: (username: string) => void
+  userRole: 'admin' | 'user' | null
+  setUserRole: (role: 'admin' | 'user' | null) => void
+  logout: () => void
   agents: AgentDetails[]
   setAgents: (agents: AgentDetails[]) => void
   teams: TeamDetails[]
@@ -84,8 +89,20 @@ export const useStore = create<Store>()(
       selectedEndpoint: 'http://localhost:7777',
       setSelectedEndpoint: (selectedEndpoint) =>
         set(() => ({ selectedEndpoint })),
-      authToken: process.env.NEXT_PUBLIC_AUTH_TOKEN ?? '',
+      authToken: '',
       setAuthToken: (authToken) => set(() => ({ authToken })),
+      username: '',
+      setUsername: (username) => set(() => ({ username })),
+      userRole: null,
+      setUserRole: (userRole) => set(() => ({ userRole })),
+      logout: () =>
+        set(() => ({
+          authToken: '',
+          username: '',
+          userRole: null,
+          messages: [],
+          sessionsData: null
+        })),
       agents: [],
       setAgents: (agents) => set({ agents }),
       teams: [],
@@ -110,7 +127,10 @@ export const useStore = create<Store>()(
       name: 'endpoint-storage',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        selectedEndpoint: state.selectedEndpoint
+        selectedEndpoint: state.selectedEndpoint,
+        authToken: state.authToken,
+        username: state.username,
+        userRole: state.userRole
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated?.()

@@ -12,6 +12,7 @@ import Sessions from './Sessions'
 import { Skeleton } from '@/components/ui/skeleton'
 import Link from 'next/link'
 import { useQueryState } from 'nuqs'
+import { useRouter } from 'next/navigation'
 
 const SidebarHeader = () => (
   <div className="flex items-center gap-2">
@@ -31,6 +32,47 @@ const SettingsButton = () => (
       <span className="text-xs font-medium uppercase">Settings</span>
     </Button>
   </Link>
+)
+
+const UserFooter = ({
+  username,
+  userRole,
+  onLogout
+}: {
+  username: string
+  userRole: 'admin' | 'user' | null
+  onLogout: () => void
+}) => (
+  <div className="flex items-center justify-between rounded-xl border border-primary/15 bg-accent/30 px-3 py-2">
+    <div className="flex min-w-0 items-center gap-2">
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-medium uppercase text-primary">
+        {username[0]}
+      </div>
+      <span className="truncate text-xs font-medium text-foreground">
+        {username}
+      </span>
+      {userRole && (
+        <span
+          className={`shrink-0 rounded px-1 py-0.5 text-xs ${
+            userRole === 'admin'
+              ? 'bg-primary/20 text-primary'
+              : 'bg-accent text-muted'
+          }`}
+        >
+          {userRole}
+        </span>
+      )}
+    </div>
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={onLogout}
+      className="h-6 w-6 shrink-0 hover:text-destructive"
+      title="Logout"
+    >
+      <Icon type="x" size="xs" />
+    </Button>
+  </div>
 )
 
 const NewChatButton = ({
@@ -63,6 +105,7 @@ const ModelDisplay = ({ model }: { model: string }) => (
 
 const Sidebar = () => {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const router = useRouter()
   const { clearChat, focusChatInput, initialize } = useChatActions()
   const {
     messages,
@@ -71,8 +114,16 @@ const Sidebar = () => {
     selectedModel,
     hydrated,
     isEndpointLoading,
-    mode
+    mode,
+    username,
+    userRole,
+    logout
   } = useStore()
+
+  const handleLogout = () => {
+    logout()
+    router.replace('/login')
+  }
   const [isMounted, setIsMounted] = useState(false)
   const [agentId] = useQueryState('agent')
   const [teamId] = useQueryState('team')
@@ -157,7 +208,14 @@ const Sidebar = () => {
             </>
           )}
         </div>
-        <div className="mt-auto border-t border-primary/15 pt-3">
+        <div className="mt-auto space-y-2 border-t border-primary/15 pt-3">
+          {username && (
+            <UserFooter
+              username={username}
+              userRole={userRole}
+              onLogout={handleLogout}
+            />
+          )}
           <SettingsButton />
         </div>
       </motion.div>
