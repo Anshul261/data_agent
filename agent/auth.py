@@ -2,6 +2,8 @@ import bcrypt
 from sqlalchemy import create_engine, text
 from typing import Optional
 
+_ENGINE_KWARGS = {"pool_pre_ping": True, "pool_recycle": 1800}
+
 
 def hash_password(plain: str) -> str:
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
@@ -12,7 +14,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def ensure_users_table(db_url: str) -> None:
-    engine = create_engine(db_url)
+    engine = create_engine(db_url, **_ENGINE_KWARGS)
     with engine.connect() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
@@ -28,7 +30,7 @@ def ensure_users_table(db_url: str) -> None:
 
 
 def get_user(username: str, db_url: str) -> Optional[dict]:
-    engine = create_engine(db_url)
+    engine = create_engine(db_url, **_ENGINE_KWARGS)
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT id::text, username, hashed_password, role FROM users WHERE username = :username"),
@@ -41,7 +43,7 @@ def get_user(username: str, db_url: str) -> Optional[dict]:
 
 
 def create_user(username: str, password: str, role: str, db_url: str) -> dict:
-    engine = create_engine(db_url)
+    engine = create_engine(db_url, **_ENGINE_KWARGS)
     hashed = hash_password(password)
     with engine.connect() as conn:
         row = conn.execute(
@@ -58,7 +60,7 @@ def create_user(username: str, password: str, role: str, db_url: str) -> dict:
 
 
 def admin_exists(db_url: str) -> bool:
-    engine = create_engine(db_url)
+    engine = create_engine(db_url, **_ENGINE_KWARGS)
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT COUNT(*) FROM users WHERE role = 'admin'")

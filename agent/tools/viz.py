@@ -27,7 +27,7 @@ class _Chart(_Base):
 class VisualizationTools(Toolkit):
     def __init__(
         self,
-        db_path: str = "./tmp/data.db",
+        db_url: str,
         base_url: str = "http://localhost:7777",
         enable_create_bar_chart: bool = True,
         enable_create_line_chart: bool = True,
@@ -45,7 +45,11 @@ class VisualizationTools(Toolkit):
             raise ImportError("matplotlib is not installed. Please install it using: `pip install matplotlib`")
 
         self.base_url = base_url.rstrip("/")
-        self._engine = create_engine(f"sqlite:///{db_path}")
+        self._engine = create_engine(
+            db_url,
+            pool_pre_ping=True,   # test connection before use — handles stale Azure connections
+            pool_recycle=1800,    # recycle connections every 30 min
+        )
         _Base.metadata.create_all(self._engine)
 
         tools: List[Any] = []
@@ -96,10 +100,15 @@ class VisualizationTools(Toolkit):
 
     def get_chart_bytes(self, chart_id: str) -> Optional[bytes]:
         """Retrieve chart PNG bytes by ID. Returns None if not found."""
-        with Session(self._engine) as session:
-            chart = session.get(_Chart, chart_id)
-            if chart:
-                return chart.image_data
+        try:
+            with Session(self._engine) as session:
+                chart = session.get(_Chart, chart_id)
+                if chart:
+                    return bytes(chart.image_data)
+                logger.warning(f"Chart {chart_id} not found in database")
+                return None
+        except Exception as e:
+            logger.error(f"Error retrieving chart {chart_id}: {e}")
             return None
 
     def _normalize_data_for_charts(

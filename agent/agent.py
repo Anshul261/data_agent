@@ -14,7 +14,6 @@ from agno.os import AgentOS
 from agno.os.middleware.jwt import JWTMiddleware
 from agno.tools import tool
 from agno.tools.reasoning import ReasoningTools
-from agno.db.sqlite import SqliteDb
 from agno.knowledge import Knowledge
 from agno.vectordb.pgvector import PgVector
 from agno.vectordb.search import SearchType
@@ -36,19 +35,17 @@ if not JWT_SECRET:
         "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
     )
 
-print("Connecting to SQLite Memory...")
+postgres_url = os.getenv("AZURE_POSTGRES_URL")
+if not postgres_url:
+    raise RuntimeError("AZURE_POSTGRES_URL environment variable is required.")
 
-db = SqliteDb(db_file=os.getenv('AGENT_DB_FILE', './tmp/data.db'))
-
-print("Connected to PostgreSQL Agent KB")
-
-db_knowledge_base_postgres_url = os.getenv("POSTGRES_URL")
-db_knowledge_base_postgres = PostgresDb(db_url=db_knowledge_base_postgres_url)
-
-print("Connected to PostgreSQL Knowledge Base")
+# Single Azure PostgreSQL — sessions, knowledge base, vector store, charts, users
+print("Connecting to Azure PostgreSQL...")
+db = PostgresDb(db_url=postgres_url)
+print("Connected to Azure PostgreSQL (agent sessions)")
 
 # Ensure users table exists
-auth_utils.ensure_users_table(db_knowledge_base_postgres_url)
+auth_utils.ensure_users_table(postgres_url)
 
 # Knowledge Base Setup - Ollama Embedder + PgVector
 print("Setting up Knowledge Base...")
@@ -60,7 +57,7 @@ embedder = OllamaEmbedder(
 
 knowledge_vector_db = PgVector(
     table_name="ticket_analytics_kb",
-    db_url=db_knowledge_base_postgres_url,
+    db_url=postgres_url,
     embedder=embedder,
     search_type=SearchType.hybrid,
 )
@@ -69,7 +66,7 @@ ticket_knowledge = Knowledge(
     name="ticket_analytics_knowledge",
     description="Table schemas, validated queries, and business rules for ticket analytics",
     vector_db=knowledge_vector_db,
-    contents_db=PostgresDb(db_url=db_knowledge_base_postgres_url),
+    contents_db=PostgresDb(db_url=postgres_url),
     max_results=5,
 )
 print("Knowledge Base configured")
@@ -83,13 +80,13 @@ clickhouse_client = clickhouse_connect.get_client(
     password=os.getenv("CLICKHOUSE_PASSWORD", ""),
     database=os.getenv("CLICKHOUSE_DATABASE", "default"),
 )
-print(f"Connected to {os.getenv('CLICKHOUSE_HOST')}")
+print(f"Connected to ClickHouse at {os.getenv('CLICKHOUSE_HOST')}")
 
 # Visualization tools setup
 print("Setting up Visualization Tools...")
 chart_base_url = os.getenv("CHART_BASE_URL", "http://localhost:7777")
 viz_tools = VisualizationTools(
-    db_path=os.getenv('AGENT_DB_FILE', './tmp/data.db'),
+    db_url=postgres_url,
     base_url=chart_base_url,
 )
 print("Visualization Tools configured")
@@ -388,7 +385,7 @@ class BootstrapRequest(BaseModel):
 @app.post("/auth/login")
 async def login(req: LoginRequest):
     """Authenticate a user and return a JWT."""
-    user = auth_utils.get_user(req.username, db_knowledge_base_postgres_url)
+    user = auth_utils.get_user(req.username, postgres_url)
     if not user or not auth_utils.verify_password(req.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
@@ -409,9 +406,9 @@ async def login(req: LoginRequest):
 @app.post("/auth/bootstrap")
 async def bootstrap_admin(req: BootstrapRequest):
     """Seed the first admin user. Only works when no admin exists yet."""
-    if auth_utils.admin_exists(db_knowledge_base_postgres_url):
+    if auth_utils.admin_exists(postgres_url):
         raise HTTPException(status_code=409, detail="An admin user already exists")
-    user = auth_utils.create_user(req.username, req.password, "admin", db_knowledge_base_postgres_url)
+    user = auth_utils.create_user(req.username, req.password, "admin", postgres_url)
     return {"message": "Admin user created", "username": user["username"]}
 
 
