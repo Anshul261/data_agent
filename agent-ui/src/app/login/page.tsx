@@ -21,6 +21,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showRecovery, setShowRecovery] = useState(false)
+  const [recoveryUsername, setRecoveryUsername] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [recoveryKey, setRecoveryKey] = useState('')
+  const [isRecovering, setIsRecovering] = useState(false)
+  const [recoveryError, setRecoveryError] = useState('')
+  const [recoverySuccess, setRecoverySuccess] = useState('')
 
   // Already authenticated → go home
   useEffect(() => {
@@ -60,6 +67,42 @@ export default function LoginPage() {
       setError('Cannot connect to backend. Is the server running?')
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleRecoverPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setRecoveryError('')
+    setRecoverySuccess('')
+    setIsRecovering(true)
+
+    try {
+      const response = await fetch(APIRoutes.RecoverPassword(selectedEndpoint), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: recoveryUsername,
+          new_password: newPassword,
+          recovery_key: recoveryKey
+        })
+      })
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setRecoveryError(
+          (data as { detail?: string }).detail || 'Password reset failed'
+        )
+        return
+      }
+
+      setRecoverySuccess('Password reset successful. Sign in with the new password.')
+      setUsernameInput(recoveryUsername)
+      setPassword(newPassword)
+      setShowRecovery(false)
+    } catch {
+      setRecoveryError('Cannot connect to backend. Is the server running?')
+    } finally {
+      setIsRecovering(false)
     }
   }
 
@@ -121,6 +164,93 @@ export default function LoginPage() {
             {isLoading ? 'Signing in...' : 'Sign in'}
           </Button>
         </form>
+
+        <div className="space-y-3">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => {
+              setShowRecovery((prev) => !prev)
+              setRecoveryError('')
+              setRecoverySuccess('')
+              if (!showRecovery) {
+                setRecoveryUsername(usernameInput || 'admin')
+              }
+            }}
+            className="h-9 w-full rounded-xl text-xs font-medium uppercase text-muted hover:text-foreground"
+          >
+            {showRecovery ? 'Hide Recovery' : 'Forgot Password?'}
+          </Button>
+
+          {showRecovery && (
+            <form onSubmit={handleRecoverPassword} className="space-y-3">
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase text-muted">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  value={recoveryUsername}
+                  onChange={(e) => setRecoveryUsername(e.target.value)}
+                  required
+                  className="flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase text-muted">
+                  New Password
+                </label>
+                <input
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  required
+                  minLength={8}
+                  className="flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-xs font-medium uppercase text-muted">
+                  Recovery Key
+                </label>
+                <input
+                  type="password"
+                  value={recoveryKey}
+                  onChange={(e) => setRecoveryKey(e.target.value)}
+                  placeholder="AUTH_RECOVERY_KEY"
+                  required
+                  className="flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                />
+              </div>
+
+              {recoveryError && (
+                <p className="rounded-lg bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  {recoveryError}
+                </p>
+              )}
+
+              <Button
+                type="submit"
+                disabled={
+                  isRecovering || !recoveryUsername || !newPassword || !recoveryKey
+                }
+                variant="outline"
+                className="h-10 w-full rounded-xl text-xs font-medium uppercase"
+              >
+                {isRecovering ? 'Resetting...' : 'Reset Password'}
+              </Button>
+            </form>
+          )}
+
+          {recoverySuccess && (
+            <p className="rounded-lg bg-positive/10 px-3 py-2 text-xs text-positive">
+              {recoverySuccess}
+            </p>
+          )}
+        </div>
 
         <p className="text-center text-xs text-muted">
           Connecting to{' '}

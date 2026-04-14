@@ -59,6 +59,23 @@ def create_user(username: str, password: str, role: str, db_url: str) -> dict:
     return {"id": row[0], "username": row[1], "role": row[2]}
 
 
+def update_user_password(username: str, password: str, db_url: str) -> bool:
+    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    hashed = hash_password(password)
+    with engine.connect() as conn:
+        result = conn.execute(
+            text("""
+                UPDATE users
+                SET hashed_password = :hashed
+                WHERE username = :username
+            """),
+            {"username": username, "hashed": hashed},
+        )
+        conn.commit()
+    engine.dispose()
+    return result.rowcount > 0
+
+
 def admin_exists(db_url: str) -> bool:
     engine = create_engine(db_url, **_ENGINE_KWARGS)
     with engine.connect() as conn:
