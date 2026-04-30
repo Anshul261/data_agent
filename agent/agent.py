@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -12,7 +13,7 @@ import jwt
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
 from agno.knowledge import Knowledge
-from agno.knowledge.embedder.ollama import OllamaEmbedder
+from agno.knowledge.embedder.huggingface import HuggingfaceCustomEmbedder
 from agno.models.azure import AzureOpenAI
 from agno.os import AgentOS
 from agno.os.middleware.jwt import JWTMiddleware
@@ -66,9 +67,14 @@ knowledge_vector_db = None
 
 if enable_knowledge_base:
     print("Setting up Knowledge Base...")
-    embedder = OllamaEmbedder(
-        id=os.getenv("EMBEDDING_MODEL", "nomic-embed-text-v2-moe"),
-        host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+    hf_api_key = os.getenv("HUGGINGFACE_API_KEY") or os.getenv("HUGGINGFACE_HUB_TOKEN")
+    if not hf_api_key:
+        raise RuntimeError(
+            "Knowledge base embedding requires HUGGINGFACE_HUB_TOKEN or HUGGINGFACE_API_KEY."
+        )
+    embedder = HuggingfaceCustomEmbedder(
+        id=os.getenv("HUGGINGFACE_EMBEDDING_MODEL", "google/embeddinggemma-300m"),
+        api_key=hf_api_key,
         dimensions=int(os.getenv("EMBEDDING_DIMENSIONS", "768")),
     )
 
@@ -76,7 +82,7 @@ if enable_knowledge_base:
         table_name="ticket_analytics_kb",
         db_url=postgres_url,
         embedder=embedder,
-        search_type=SearchType.hybrid,
+        search_type=SearchType.vector,
     )
 
     ticket_knowledge = Knowledge(
@@ -111,12 +117,189 @@ viz_tools = VisualizationTools(
 print("Visualization Tools configured")
 
 
+ALLOWED_TABLE_NAME = os.getenv("CLICKHOUSE_ALLOWED_TABLE", "LLM_access_tickets")
+READ_ONLY_PREFIXES = ("SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN")
+DISALLOWED_SQL_KEYWORDS = {
+    "ALTER",
+    "ATTACH",
+    "CREATE",
+    "DELETE",
+    "DETACH",
+    "DROP",
+    "GRANT",
+    "INSERT",
+    "KILL",
+    "OPTIMIZE",
+    "RENAME",
+    "REVOKE",
+    "SYSTEM",
+    "TRUNCATE",
+    "UPDATE",
+    "USE",
+}
+TABLE_REFERENCE_PATTERN = re.compile(
+    r"""(?ix)
+    \b(?:from|join)\s+
+    (
+        (?:
+            [`"]?[a-zA-Z_][\w]*[`"]?\.
+        )?
+        [`"]?[a-zA-Z_][\w]*[`"]?
+    )
+    """
+)
+
+
+def _normalize_identifier(identifier: str) -> str:
+    return identifier.replace("`", "").replace('"', "").strip().lower()
+
+
+def _resolve_allowed_table() -> tuple[str, str]:
+    configured_database = os.getenv("CLICKHOUSE_DATABASE", "default")
+    escaped_name = ALLOWED_TABLE_NAME.replace("'", "''")
+    escaped_db = configured_database.replace("'", "''")
+    result = clickhouse_client.query(
+        f"""
+        SELECT database, name
+        FROM system.tables
+        WHERE lower(name) = lower('{escaped_name}')
+        ORDER BY database = '{escaped_db}' DESC, database = 'default' DESC, database
+        LIMIT 1
+        """
+    )
+    if not result.result_rows:
+        raise RuntimeError(
+            f"Required ClickHouse table/view '{ALLOWED_TABLE_NAME}' was not found in system.tables."
+        )
+    database, table_name = result.result_rows[0]
+    return str(database), str(table_name)
+
+
+ALLOWED_TABLE_DATABASE, RESOLVED_ALLOWED_TABLE_NAME = _resolve_allowed_table()
+ALLOWED_TABLE_FQN = f"{ALLOWED_TABLE_DATABASE}.{RESOLVED_ALLOWED_TABLE_NAME}"
+ALLOWED_TABLE_IDENTIFIERS = {
+    _normalize_identifier(ALLOWED_TABLE_NAME),
+    _normalize_identifier(RESOLVED_ALLOWED_TABLE_NAME),
+    _normalize_identifier(ALLOWED_TABLE_FQN),
+}
+
+
+def _rewrite_allowed_table_references(sql_query: str) -> str:
+    pattern = re.compile(
+        rf"""(?ix)
+        (?<![\w.])
+        {re.escape(ALLOWED_TABLE_NAME)}
+        (?![\w])
+        """
+    )
+    return pattern.sub(ALLOWED_TABLE_FQN, sql_query)
+
+
+def _extract_referenced_tables(sql_query: str) -> set[str]:
+    return {
+        _normalize_identifier(match.group(1))
+        for match in TABLE_REFERENCE_PATTERN.finditer(sql_query)
+    }
+
+
+def _is_allowed_table(identifier: str) -> bool:
+    return _normalize_identifier(identifier) in ALLOWED_TABLE_IDENTIFIERS
+
+
+def _validate_read_only_query(sql_query: str) -> tuple[bool, str]:
+    stripped_query = sql_query.strip()
+    query_upper = stripped_query.upper()
+
+    if not any(query_upper.startswith(prefix) for prefix in READ_ONLY_PREFIXES):
+        return (
+            False,
+            "Error: Only SELECT, SHOW, DESCRIBE, DESC, and EXPLAIN queries are allowed for safety.",
+        )
+
+    for keyword in DISALLOWED_SQL_KEYWORDS:
+        if re.search(rf"\b{keyword}\b", query_upper):
+            return (
+                False,
+                "Error: Mutating or administrative SQL statements are not allowed.",
+            )
+
+    if query_upper.startswith("SHOW TABLES"):
+        return True, ""
+
+    describe_match = re.match(
+        r"""(?ix)
+        \s*des(?:cribe|c)\s+(?:table\s+)?
+        (
+            (?:
+                [`"]?[a-zA-Z_][\w]*[`"]?\.
+            )?
+            [`"]?[a-zA-Z_][\w]*[`"]?
+        )
+        """,
+        stripped_query,
+    )
+    if describe_match:
+        if not _is_allowed_table(describe_match.group(1)):
+            return (
+                False,
+                f"Error: Only schema access for {RESOLVED_ALLOWED_TABLE_NAME} is allowed.",
+            )
+        return True, ""
+
+    referenced_tables = _extract_referenced_tables(stripped_query)
+    if not referenced_tables:
+        return (
+            False,
+            f"Error: Queries must read from {RESOLVED_ALLOWED_TABLE_NAME} only.",
+        )
+
+    disallowed_tables = sorted(
+        table_name for table_name in referenced_tables if not _is_allowed_table(table_name)
+    )
+    if disallowed_tables:
+        return (
+            False,
+            f"Error: Only {RESOLVED_ALLOWED_TABLE_NAME} is allowed. Blocked references: {', '.join(disallowed_tables)}.",
+        )
+
+    return True, ""
+
+
+def _format_clickhouse_result(result) -> str:
+    if not result.result_rows:
+        return "Query executed successfully but returned no results."
+
+    columns = result.column_names
+    rows = result.result_rows
+    col_widths = [len(str(col)) for col in columns]
+    for row in rows[:50]:
+        for i, val in enumerate(row):
+            col_widths[i] = max(col_widths[i], len(str(val)))
+
+    lines = []
+    header = " | ".join(str(col).ljust(col_widths[i]) for i, col in enumerate(columns))
+    separator = "-+-".join("-" * w for w in col_widths)
+    lines.append(header)
+    lines.append(separator)
+
+    for row in rows[:50]:
+        lines.append(
+            " | ".join(str(val).ljust(col_widths[i]) for i, val in enumerate(row))
+        )
+
+    if len(rows) > 50:
+        lines.append(f"\n... ({len(rows) - 50} more rows not shown)")
+
+    lines.append(f"\nTotal rows returned: {len(rows)}")
+    return "\n".join(lines)
+
 # Define tools for the agent
 @tool
 def execute_clickhouse_query(sql_query: str) -> str:
     """
     Execute a SQL query against the ClickHouse database.
     Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed.
+    Only LLM_access_tickets table is allowed for data queries.
 
     Args:
         sql_query: The SQL query to execute (must be a read-only query)
@@ -125,53 +308,20 @@ def execute_clickhouse_query(sql_query: str) -> str:
         The query results formatted as a table string
     """
     try:
-        # Security check - only allow read operations
+        is_valid, error_message = _validate_read_only_query(sql_query)
+        if not is_valid:
+            return error_message
+
         query_upper = sql_query.strip().upper()
-        if not any(
-            query_upper.startswith(cmd)
-            for cmd in ["SELECT", "SHOW", "DESCRIBE", "EXPLAIN"]
-        ):
-            return "Error: Only SELECT, SHOW, DESCRIBE, and EXPLAIN queries are allowed for safety."
+        if query_upper.startswith("SHOW TABLES"):
+            return list_all_tables.entrypoint()
 
-        # Execute the query
-        result = clickhouse_client.query(sql_query)
+        if re.match(r"(?is)^\s*des(?:cribe|c)\b", sql_query.strip()):
+            table_name = sql_query.strip().split()[-1]
+            return get_table_schema.entrypoint(table_name)
 
-        if not result.result_rows:
-            return "Query executed successfully but returned no results."
-
-        # Format as table
-        columns = result.column_names
-        rows = result.result_rows
-
-        # Calculate column widths
-        col_widths = [len(str(col)) for col in columns]
-        for row in rows[:50]:
-            for i, val in enumerate(row):
-                col_widths[i] = max(col_widths[i], len(str(val)))
-
-        # Build table
-        lines = []
-
-        # Header
-        header = " | ".join(
-            str(col).ljust(col_widths[i]) for i, col in enumerate(columns)
-        )
-        separator = "-+-".join("-" * w for w in col_widths)
-        lines.append(header)
-        lines.append(separator)
-
-        # Rows (limit to 50 for readability)
-        for row in rows[:50]:
-            lines.append(
-                " | ".join(str(val).ljust(col_widths[i]) for i, val in enumerate(row))
-            )
-
-        if len(rows) > 50:
-            lines.append(f"\n... ({len(rows) - 50} more rows not shown)")
-
-        lines.append(f"\nTotal rows returned: {len(rows)}")
-
-        return "\n".join(lines)
+        result = clickhouse_client.query(_rewrite_allowed_table_references(sql_query))
+        return _format_clickhouse_result(result)
 
     except Exception as e:
         return f"Error executing query: {str(e)}"
@@ -187,13 +337,12 @@ def list_all_tables() -> str:
         A list of all table names in the database
     """
     try:
-        result = clickhouse_client.query("SHOW TABLES")
-        tables = [row[0] for row in result.result_rows]
-
-        if not tables:
-            return "No tables found in the database."
-
-        return "Available tables:\n" + "\n".join(f"  • {table}" for table in tables)
+        return "Available tables:\n" + "\n".join(
+            [
+                f"  • {RESOLVED_ALLOWED_TABLE_NAME}",
+                f"    database: {ALLOWED_TABLE_DATABASE}",
+            ]
+        )
     except Exception as e:
         return f"Error listing tables: {str(e)}"
 
@@ -211,10 +360,15 @@ def get_table_schema(table_name: str) -> str:
         The table schema with column details
     """
     try:
-        result = clickhouse_client.query(f"DESCRIBE TABLE {table_name}")
+        if not _is_allowed_table(table_name):
+            return (
+                f"Error: Schema access is restricted to {RESOLVED_ALLOWED_TABLE_NAME} only."
+            )
+
+        result = clickhouse_client.query(f"DESCRIBE TABLE {ALLOWED_TABLE_FQN}")
 
         lines = [
-            f"Schema for table: {table_name}",
+            f"Schema for table: {RESOLVED_ALLOWED_TABLE_NAME}",
             "=" * 90,
             f"{'Column Name':<35} {'Type':<30} {'Default':<20}",
             "-" * 90,
@@ -242,6 +396,7 @@ llm = AzureOpenAI(
 
 base_instructions = [
     "You are a ticket analytics expert with direct database access.",
+    f"Your ClickHouse access is strictly limited to the {RESOLVED_ALLOWED_TABLE_NAME} view in database {ALLOWED_TABLE_DATABASE}.",
     "When users ask questions:",
     "1. Use get_table_schema(table_name) to understand table structure when needed",
     "2. Use execute_clickhouse_query(sql) to run queries and get actual data",
@@ -316,6 +471,7 @@ def main():
     print("=" * 60)
     print(f"\nConnected to ClickHouse at {os.getenv('CLICKHOUSE_HOST')}")
     print(f"  Database: {os.getenv('CLICKHOUSE_DATABASE')}")
+    print(f"  Allowed view: {ALLOWED_TABLE_FQN}")
     print("\nTips:")
     print("  - Ask: 'What tables are available?'")
     print("  - Ask: 'Show me the schema of [table_name]'")
@@ -532,7 +688,7 @@ async def delete_knowledge():
             detail="Knowledge base is disabled. Set ENABLE_KNOWLEDGE_BASE=true to use this endpoint.",
         )
     try:
-        knowledge_vector_db.delete_table()
+        knowledge_vector_db.drop()
         knowledge_vector_db.create()
         return {"status": "success", "message": "Knowledge base cleared"}
     except Exception as e:
@@ -542,8 +698,10 @@ async def delete_knowledge():
 @app.post("/api/knowledge/load")
 async def load_knowledge():
     """
-    Load knowledge files (table schemas, SQL queries, business rules) into the vector database.
-    Uses deduplication via skip_if_exists=True to prevent re-uploading already loaded files.
+    Load the trimmed knowledge set into the vector database.
+    Raw SQL files are intentionally excluded from embedding retrieval. The validated
+    query catalog is embedded instead, while the .sql files remain the source of truth
+    in the repository.
     """
     if not enable_knowledge_base or ticket_knowledge is None:
         raise HTTPException(
@@ -553,10 +711,10 @@ async def load_knowledge():
     from pathlib import Path
 
     knowledge_dir = Path(__file__).parent / "knowledge"
-    files = []
-
-    for pattern in ["tables/*.json", "queries/*.sql", "business/*.json"]:
-        files.extend(sorted(knowledge_dir.glob(pattern)))
+    files = [
+        knowledge_dir / "tables" / "LLM_access_tickets.json",
+        *sorted(knowledge_dir.glob("business/*.json")),
+    ]
 
     loaded, errors = 0, []
 

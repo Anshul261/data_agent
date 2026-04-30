@@ -1,8 +1,30 @@
 {
-  "table_name": "prod_tickets_2025___tickets",
+  "table_name": "LLM_access_tickets",
   "database": "prod_tickets_2025",
-  "description": "Main IT support tickets table from ManageEngine ServiceDesk Plus. Contains all ticket data including requester info, technician assignments, priorities, statuses, SLA tracking, resolution details, and timestamps. This is the primary table for all ticket analytics.",
-  "row_count_approx": 19374,
+  "description": "Filtered IT support tickets view from ManageEngine ServiceDesk Plus. This is the only tickets dataset the agent is allowed to query. It excludes support group rows for MPS Team and Mimecast Support Team - JLT, and excludes account rows for Emirates Airlines and NON-MSDT.",
+  "question_examples": [
+    "Which table should I query for ticket analytics?",
+    "What is the allowed tickets table?",
+    "Which field stores priority?",
+    "Which fields store status and resolution timestamps?"
+  ],
+  "routing_hints": {
+    "allowed_table": "Use only LLM_access_tickets for ticket analytics queries.",
+    "priority_fields": ["priority__name", "priority__id", "priority__color"],
+    "status_fields": ["status__name", "status__id", "status__color"],
+    "time_fields": [
+      "created_time_ts",
+      "assigned_time_ts",
+      "resolved_time_ts",
+      "completed_time_ts",
+      "last_updated_time_ts",
+      "due_by_time_ts",
+      "first_response_due_by_time_ts"
+    ],
+    "fcr_field": "is_fcr",
+    "sla_fields": ["is_overdue", "is_first_response_overdue"]
+  },
+  "row_count_approx": 14737,
   "columns": [
     {"name": "id", "type": "String", "description": "Unique ticket identifier"},
     {"name": "subject", "type": "Nullable(String)", "description": "Ticket subject/title"},
@@ -77,14 +99,7 @@
     {"name": "_dlt_load_id", "type": "String", "description": "DLT pipeline load identifier (internal)"},
     {"name": "_dlt_id", "type": "String", "description": "DLT record identifier (internal)"}
   ],
-  "relationships": [
-    {
-      "table": "technician_customer_assignments",
-      "join_column": "technician__name",
-      "target_column": "technician_db_name",
-      "description": "Links tickets to technician-customer contract assignments"
-    }
-  ],
+  "relationships": [],
   "common_queries": [
     "Ticket volume by status",
     "Ticket volume over time (daily/weekly/monthly)",

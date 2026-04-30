@@ -2,7 +2,26 @@
   "type": "business_logic",
   "name": "Data Quality Notes and Query Gotchas",
   "description": "Important data quality considerations and common pitfalls when querying the ticket analytics database",
-  "content": "Database: ClickHouse (prod_tickets_2025)\n\nKey Tables:\n- prod_tickets_2025___tickets: Main tickets table (~19,374 rows)\n- technician_customer_assignments: Technician-customer mapping\n- Tables prefixed with _dlt_ are internal pipeline tables and should NOT be queried for analytics\n- Tables with 'backup' in the name are historical snapshots and should NOT be used for current analytics\n- Tables with 'staging' prefix are temporary pipeline tables\n\nColumn Naming Convention:\n- Nested objects use double underscore (__) as separator: e.g., requester__name, status__name, priority__id\n- Timestamp columns end with _ts suffix: e.g., created_time_ts, resolved_time_ts\n- Display values end with __display_value: e.g., created_time__display_value\n\nData Quality Issues:\n- ~12 tickets have NULL priority__name\n- Some tickets have NULL technician__name (unassigned)\n- time_elapsed_hours can be NULL for tickets not yet resolved\n- Always use IS NOT NULL filters when aggregating nullable columns\n- Use the _ts timestamp columns for date math, not the display_value columns\n\nClickHouse-Specific Notes:\n- Use toYear(), toMonth(), toDate() for date extraction\n- Use formatDateTime() for date formatting\n- Use quantile(0.5)() for median calculations\n- Use dateDiff('hour', start, end) for time differences\n- LIMIT is important for large result sets",
+  "question_examples": [
+    "Which table am I allowed to query?",
+    "What are the query gotchas for ticket analytics?",
+    "Which timestamp field should I use for date calculations?",
+    "Are there NULL priority or technician values?"
+  ],
+  "lookup_fields": [
+    "LLM_access_tickets",
+    "priority__name",
+    "technician__name",
+    "created_time_ts",
+    "resolved_time_ts"
+  ],
+  "aliases": [
+    "query gotchas",
+    "allowed table",
+    "data quality issues",
+    "clickhouse notes"
+  ],
+  "content": "Database: ClickHouse (prod_tickets_2025)\n\nAccessible Analytics View:\n- LLM_access_tickets: Filtered tickets view (~14,737 rows) and the only tickets dataset the agent is allowed to query\n- The view excludes rows where group__name is MPS Team or Mimecast Support Team - JLT\n- The view excludes rows where account__name is Emirates Airlines or NON-MSDT\n- Do not reference prod_tickets_2025___tickets, backup tables, staging tables, or _dlt_ tables in validated analytics queries\n\nColumn Naming Convention:\n- Nested objects use double underscore (__) as separator: e.g., requester__name, status__name, priority__id\n- Timestamp columns end with _ts suffix: e.g., created_time_ts, resolved_time_ts\n- Display values end with __display_value: e.g., created_time__display_value\n\nData Quality Issues:\n- ~12 tickets have NULL priority__name\n- Some tickets have NULL technician__name (unassigned)\n- time_elapsed_hours can be NULL for tickets not yet resolved\n- Always use IS NOT NULL filters when aggregating nullable columns\n- Use the _ts timestamp columns for date math, not the display_value columns\n\nClickHouse-Specific Notes:\n- Use toYear(), toMonth(), toDate() for date extraction\n- Use formatDateTime() for date formatting\n- Use quantile(0.5)() for median calculations\n- Use dateDiff('hour', start, end) for time differences\n- LIMIT is important for large result sets",
   "category": "data_quality",
   "tags": ["data_quality", "gotchas", "clickhouse", "column_naming"]
 }

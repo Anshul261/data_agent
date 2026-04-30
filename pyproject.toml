@@ -5,7 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "agno[ollama,pgvector]>=2.3.2",
+    "agno[pgvector]>=2.3.2",
     "aiohttp>=3.13.2",
     "anthropic>=0.75.0",
     "azure-ai-inference>=1.0.0b9",
@@ -14,6 +14,7 @@ dependencies = [
     "dlt[clickhouse]>=1.18.2",
     "fastapi>=0.121.3",
     "gradio>=5.50.0",
+    "huggingface-hub>=1.1.5",
     "mcp>=1.22.0",
     "mcp-clickhouse>=0.1.12",
     "openai>=2.8.1",

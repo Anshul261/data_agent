@@ -1,0 +1,133 @@
+[
+  {
+    "type": "validated_query",
+    "name": "ticket_volume_by_priority",
+    "question": "How many tickets are there for each priority level?",
+    "aliases": [
+      "ticket count by priority",
+      "number of tickets for each priority",
+      "tickets grouped by priority",
+      "count of P1 P2 P3 P4 tickets",
+      "priority distribution"
+    ],
+    "when_to_use": "Use this validated query when the user asks for ticket counts by priority, priority distribution, or the number of P1, P2, P3, and P4 tickets.",
+    "table": "LLM_access_tickets",
+    "group_by": ["priority__name"],
+    "returns": ["priority", "ticket_count", "percentage"],
+    "sql": "SELECT priority__name AS priority, COUNT(*) AS ticket_count, ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM LLM_access_tickets), 2) AS percentage FROM LLM_access_tickets WHERE priority__name IS NOT NULL GROUP BY priority__name ORDER BY ticket_count DESC"
+  },
+  {
+    "type": "validated_query",
+    "name": "ticket_volume_by_status",
+    "question": "How many tickets are in each status?",
+    "aliases": [
+      "status distribution",
+      "count tickets by status",
+      "number of open closed assigned tickets",
+      "tickets grouped by current status",
+      "status breakdown"
+    ],
+    "when_to_use": "Use this validated query when the user asks for ticket counts by current status such as Open, Closed, Assigned, or In Progress.",
+    "table": "LLM_access_tickets",
+    "group_by": ["status__name"],
+    "returns": ["status", "ticket_count", "percentage"],
+    "sql": "SELECT status__name AS status, COUNT(*) AS ticket_count, ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM LLM_access_tickets), 2) AS percentage FROM LLM_access_tickets WHERE status__name IS NOT NULL GROUP BY status__name ORDER BY ticket_count DESC"
+  },
+  {
+    "type": "validated_query",
+    "name": "monthly_ticket_trend",
+    "question": "What is the monthly ticket volume trend?",
+    "aliases": [
+      "month over month ticket trend",
+      "ticket count by month",
+      "monthly volume trend",
+      "tickets over time by month",
+      "monthly ticket history"
+    ],
+    "when_to_use": "Use this validated query when the user asks for monthly ticket trend, monthly charting, or ticket counts over time by month.",
+    "table": "LLM_access_tickets",
+    "group_by": ["year", "month", "month_label"],
+    "returns": ["year", "month", "month_label", "ticket_count"],
+    "sql": "SELECT toYear(created_time_ts) AS year, toMonth(created_time_ts) AS month, formatDateTime(created_time_ts, '%Y-%m') AS month_label, COUNT(*) AS ticket_count FROM LLM_access_tickets WHERE created_time_ts IS NOT NULL GROUP BY year, month, month_label ORDER BY year, month"
+  },
+  {
+    "type": "validated_query",
+    "name": "fcr_rate",
+    "question": "What is the First Contact Resolution rate?",
+    "aliases": [
+      "first contact resolution",
+      "FCR percentage",
+      "one touch resolution rate",
+      "resolved on first interaction rate"
+    ],
+    "when_to_use": "Use this validated query when the user asks for FCR rate overall or by priority.",
+    "table": "LLM_access_tickets",
+    "group_by": ["priority__name"],
+    "returns": ["priority", "total_tickets", "fcr_tickets", "fcr_rate_pct"],
+    "sql": "SELECT priority__name AS priority, COUNT(*) AS total_tickets, SUM(CASE WHEN is_fcr = true THEN 1 ELSE 0 END) AS fcr_tickets, ROUND(SUM(CASE WHEN is_fcr = true THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS fcr_rate_pct FROM LLM_access_tickets WHERE priority__name IS NOT NULL GROUP BY priority__name ORDER BY priority__name"
+  },
+  {
+    "type": "validated_query",
+    "name": "sla_compliance",
+    "question": "What is the overall SLA compliance rate?",
+    "aliases": [
+      "SLA breach rate",
+      "on time vs overdue tickets",
+      "overdue percentage by priority",
+      "SLA compliance percentage"
+    ],
+    "when_to_use": "Use this validated query when the user asks for SLA compliance, overdue rate, or on-time versus overdue tickets by priority.",
+    "table": "LLM_access_tickets",
+    "group_by": ["priority__name"],
+    "returns": ["priority", "total_tickets", "overdue_tickets", "on_time_tickets", "sla_compliance_pct"],
+    "sql": "SELECT priority__name AS priority, COUNT(*) AS total_tickets, SUM(CASE WHEN is_overdue = true THEN 1 ELSE 0 END) AS overdue_tickets, SUM(CASE WHEN is_overdue = false OR is_overdue IS NULL THEN 1 ELSE 0 END) AS on_time_tickets, ROUND(SUM(CASE WHEN is_overdue = false OR is_overdue IS NULL THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS sla_compliance_pct FROM LLM_access_tickets WHERE priority__name IS NOT NULL GROUP BY priority__name ORDER BY priority__name"
+  },
+  {
+    "type": "validated_query",
+    "name": "avg_resolution_time_by_priority",
+    "question": "What is the average resolution time for tickets by priority?",
+    "aliases": [
+      "mean resolution time by priority",
+      "average hours to resolve by priority",
+      "resolution duration by P1 P2 P3 P4",
+      "median resolution time by priority"
+    ],
+    "when_to_use": "Use this validated query when the user asks how long tickets take to resolve by priority.",
+    "table": "LLM_access_tickets",
+    "group_by": ["priority__name"],
+    "returns": ["priority", "resolved_tickets", "avg_resolution_hours", "min_hours", "max_hours", "median_hours"],
+    "sql": "SELECT priority__name AS priority, COUNT(*) AS resolved_tickets, ROUND(AVG(time_elapsed_hours), 2) AS avg_resolution_hours, ROUND(MIN(time_elapsed_hours), 2) AS min_hours, ROUND(MAX(time_elapsed_hours), 2) AS max_hours, ROUND(quantile(0.5)(time_elapsed_hours), 2) AS median_hours FROM LLM_access_tickets WHERE resolved_time_ts IS NOT NULL AND time_elapsed_hours IS NOT NULL AND priority__name IS NOT NULL GROUP BY priority__name ORDER BY priority__name"
+  },
+  {
+    "type": "validated_query",
+    "name": "tickets_by_category",
+    "question": "How are tickets distributed across categories?",
+    "aliases": [
+      "category distribution",
+      "tickets per category",
+      "ticket volume by category",
+      "how many tickets in each category"
+    ],
+    "when_to_use": "Use this validated query when the user asks for category distribution or category-level ticket counts.",
+    "table": "LLM_access_tickets",
+    "group_by": ["category__name"],
+    "returns": ["category", "ticket_count", "percentage"],
+    "sql": "SELECT category__name AS category, COUNT(*) AS ticket_count, ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM LLM_access_tickets WHERE category__name IS NOT NULL), 2) AS percentage FROM LLM_access_tickets WHERE category__name IS NOT NULL GROUP BY category__name ORDER BY ticket_count DESC"
+  },
+  {
+    "type": "validated_query",
+    "name": "top_technicians_by_volume",
+    "question": "Who are the top technicians by ticket volume?",
+    "aliases": [
+      "top agents by ticket count",
+      "technician ranking by volume",
+      "busiest technicians",
+      "who handled the most tickets"
+    ],
+    "when_to_use": "Use this validated query when the user asks for technician ranking by assigned ticket count or wants close rate and average resolution time by technician.",
+    "table": "LLM_access_tickets",
+    "group_by": ["technician__name"],
+    "returns": ["technician", "total_tickets", "closed_tickets", "close_rate_pct", "avg_resolution_hours"],
+    "sql": "SELECT technician__name AS technician, COUNT(*) AS total_tickets, SUM(CASE WHEN status__name = 'Closed' THEN 1 ELSE 0 END) AS closed_tickets, ROUND(SUM(CASE WHEN status__name = 'Closed' THEN 1 ELSE 0 END) * 100.0 / COUNT(*), 2) AS close_rate_pct, ROUND(AVG(CASE WHEN time_elapsed_hours IS NOT NULL THEN time_elapsed_hours END), 2) AS avg_resolution_hours FROM LLM_access_tickets WHERE technician__name IS NOT NULL GROUP BY technician__name ORDER BY total_tickets DESC LIMIT 20"
+  }
+]

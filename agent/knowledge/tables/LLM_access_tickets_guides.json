@@ -1,0 +1,26 @@
+[
+  {
+    "type": "table_guide",
+    "topic": "allowed_table",
+    "question": "Which table contains the allowed ticket data?",
+    "aliases": [
+      "allowed tickets table",
+      "which table should I query",
+      "ticket analytics view",
+      "permitted ticket dataset"
+    ],
+    "answer": "Use only LLM_access_tickets in database prod_tickets_2025 for ticket analytics. Do not query prod_tickets_2025___tickets or staging tables."
+  },
+  {
+    "type": "table_guide",
+    "topic": "priority_fields",
+    "question": "Which field should I use for ticket priority?",
+    "aliases": [
+      "priority column",
+      "field for P1 P2 P3 P4",
+      "where is priority stored",
+      "priority field name"
+    ],
+    "answer": "Use priority__name for priority labels such as P1, P2, P3, and P4. Related fields are priority__id and priority__color."
+  }
+]
