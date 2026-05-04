@@ -22,6 +22,7 @@ interface MessageListProps {
 interface MessageWrapperProps {
   message: ChatMessage
   isLastMessage: boolean
+  messageId: string
 }
 
 interface ReferenceProps {
@@ -59,9 +60,9 @@ const References: FC<ReferenceProps> = ({ references }) => (
   </div>
 )
 
-const AgentMessageWrapper = ({ message }: MessageWrapperProps) => {
+const AgentMessageWrapper = ({ message, messageId }: MessageWrapperProps) => {
   return (
-    <div className="flex flex-col gap-y-9">
+    <div id={messageId} className="scroll-mt-8 flex flex-col gap-y-9">
       {message.extra_data?.reasoning_steps &&
         message.extra_data.reasoning_steps.length > 0 && (
           <div className="flex items-start gap-4">
@@ -160,6 +161,7 @@ const Messages = ({ messages }: MessageListProps) => {
     <>
       {messages.map((message, index) => {
         const key = `${message.role}-${message.created_at}-${index}`
+        const messageId = `message-${message.created_at}-${index}`
         const isLastMessage = index === messages.length - 1
 
         if (message.role === 'agent') {
@@ -167,6 +169,7 @@ const Messages = ({ messages }: MessageListProps) => {
             <AgentMessageWrapper
               key={key}
               message={message}
+              messageId={messageId}
               isLastMessage={isLastMessage}
             />
           )
