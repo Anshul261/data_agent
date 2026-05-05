@@ -7,7 +7,7 @@ import Images from './Multimedia/Images'
 import Audios from './Multimedia/Audios'
 import { memo } from 'react'
 import AgentThinkingLoader from './AgentThinkingLoader'
-import ChartArtifactCard from './ChartArtifactCard'
+import DashboardArtifactGroup from './DashboardArtifactGroup'
 import {
   parseChartArtifacts,
   stripChartArtifactBlocks
@@ -40,12 +40,9 @@ const AgentMessage = ({ message }: MessageProps) => {
         {visibleContent && (
           <MarkdownRenderer>{visibleContent}</MarkdownRenderer>
         )}
-        {chartArtifacts.map((artifact, index) => (
-          <ChartArtifactCard
-            key={`${artifact.artifact_id ?? artifact.title}-${index}`}
-            artifact={artifact}
-          />
-        ))}
+        {chartArtifacts.length > 0 && (
+          <DashboardArtifactGroup artifacts={chartArtifacts} />
+        )}
         {message.videos && message.videos.length > 0 && (
           <Videos videos={message.videos} />
         )}

@@ -29,3 +29,95 @@
   background-color: transparent;
   border-radius: 9999px;
 }
+
+@media print {
+  @page {
+    margin: 8mm;
+    size: landscape;
+  }
+
+  html,
+  body[data-printing-dashboard='true'] {
+    background: #080c12 !important;
+    height: auto !important;
+    overflow: visible !important;
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  body[data-printing-dashboard='true'] * {
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
+
+  body[data-printing-dashboard='true'] > *:not(#dashboard-print-root) {
+    display: none !important;
+  }
+
+  #dashboard-print-root {
+    display: block !important;
+    background: #080c12 !important;
+    padding: 0 !important;
+    width: 100% !important;
+  }
+
+  #dashboard-print-root > section {
+    overflow: visible !important;
+    width: 100% !important;
+    border-color: rgba(255, 255, 255, 0.18) !important;
+    box-shadow: none !important;
+    break-inside: auto !important;
+    page-break-inside: auto !important;
+  }
+
+  #dashboard-print-root [data-dashboard-card='true'] {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  #dashboard-print-root [data-dashboard-card-body='true'] {
+    padding: 10px !important;
+  }
+
+  #dashboard-print-root > section > div:last-child {
+    padding: 10px !important;
+  }
+
+  #dashboard-print-root .space-y-4 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 10px !important;
+  }
+
+  #dashboard-print-root .gap-4 {
+    gap: 10px !important;
+  }
+
+  #dashboard-print-root .gap-3 {
+    gap: 8px !important;
+  }
+
+  #dashboard-print-root .dashboard-chart-frame,
+  #dashboard-print-root .dashboard-chart-frame > div {
+    height: 220px !important;
+    min-height: 220px !important;
+  }
+
+  #dashboard-print-root .grid {
+    display: grid !important;
+  }
+
+  #dashboard-print-root .xl\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  #dashboard-print-root .xl\:grid-cols-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  #dashboard-print-root .xl\:col-span-2 {
+    grid-column: span 2 / span 2 !important;
+  }
+
+  #dashboard-print-root .print\:hidden {
+    display: none !important;
+  }
+}

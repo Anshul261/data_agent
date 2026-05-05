@@ -34,6 +34,7 @@ class VisualizationTools(Toolkit):
         enable_create_pie_chart: bool = True,
         enable_create_scatter_plot: bool = True,
         enable_create_histogram: bool = True,
+        enable_create_chart_artifact: bool = True,
         all: bool = False,
         **kwargs,
     ):
@@ -63,6 +64,8 @@ class VisualizationTools(Toolkit):
             tools.append(self.create_scatter_plot)
         if enable_create_histogram or all:
             tools.append(self.create_histogram)
+        if enable_create_chart_artifact or all:
+            tools.append(self.create_chart_artifact)
 
         super().__init__(name="visualization_tools", tools=tools, **kwargs)
 
@@ -143,6 +146,101 @@ class VisualizationTools(Toolkit):
                 return {f"Item {i + 1}": float(v) if isinstance(v, (int, float)) else 0 for i, v in enumerate(data)}
 
         return {"Data": 1.0}
+
+    def _normalize_data_for_artifacts(
+        self, data: Union[Dict[str, Any], List[Dict[str, Any]], List[Any], str]
+    ) -> List[Dict[str, Any]]:
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return [{"label": "Data", "value": data}]
+
+        if isinstance(data, dict):
+            return [{"label": str(key), "value": value} for key, value in data.items()]
+
+        if isinstance(data, list):
+            rows: List[Dict[str, Any]] = []
+            for index, item in enumerate(data):
+                if isinstance(item, dict):
+                    rows.append({str(key): value for key, value in item.items()})
+                else:
+                    rows.append({"label": f"Item {index + 1}", "value": item})
+            return rows
+
+        return [{"label": "Data", "value": data}]
+
+    def create_chart_artifact(
+        self,
+        data: Union[Dict[str, Any], List[Dict[str, Any]], List[Any], str],
+        chart_type: str,
+        title: str,
+        x_field: str = "",
+        y_field: str = "",
+        label_field: str = "",
+        value_field: str = "",
+        insight: str = "",
+        sql: str = "",
+        explanation: str = "",
+    ) -> str:
+        """
+        Create an interactive dashboard-quality chart artifact for the UI.
+
+        Use this after querying data from ClickHouse when the user asks for a
+        chart, visualization, metric, table, or dashboard component. Include
+        the returned chart-artifact block exactly in your final response.
+
+        Args:
+            data: Query result rows, a dictionary, or a JSON string.
+            chart_type: One of metric, line, bar, pie, or table.
+            title: Clear dashboard card title.
+            x_field: Field for x-axis on line/bar charts.
+            y_field: Numeric field for y-axis on line/bar charts.
+            label_field: Label/category field for pie/metric charts.
+            value_field: Numeric value field for pie/metric charts.
+            insight: One short interpretation of the chart.
+            sql: SQL used to produce the data, if available.
+            explanation: Short description of what the query measures.
+
+        Returns:
+            str: A fenced chart-artifact JSON block that the UI renders with ECharts.
+        """
+        allowed_types = {"metric", "line", "bar", "pie", "table"}
+        normalized_chart_type = chart_type.strip().lower()
+        if normalized_chart_type not in allowed_types:
+            normalized_chart_type = "bar"
+
+        rows = self._normalize_data_for_artifacts(data)
+        fields = list(rows[0].keys()) if rows else []
+
+        inferred_label = label_field or x_field or (fields[0] if fields else "label")
+        inferred_value = value_field or y_field or (fields[1] if len(fields) > 1 else inferred_label)
+
+        artifact = {
+            "kind": "chart_artifact",
+            "version": 1,
+            "artifact_id": str(uuid.uuid4()),
+            "title": title,
+            "chart_type": normalized_chart_type,
+            "data": rows,
+            "mapping": {
+                "x": x_field or inferred_label,
+                "y": y_field or inferred_value,
+                "label": inferred_label,
+                "value": inferred_value,
+            },
+            "query": {
+                "sql": sql,
+                "explanation": explanation,
+            },
+            "insight": insight,
+            "presentation": {
+                "show_legend": normalized_chart_type == "pie",
+                "show_tooltip": True,
+            },
+        }
+
+        return "```chart-artifact\n" + json.dumps(artifact, indent=2, default=str) + "\n```"
 
     def create_bar_chart(
         self,

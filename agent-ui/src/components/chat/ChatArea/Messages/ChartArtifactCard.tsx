@@ -2,7 +2,14 @@
 
 import { useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
-import { BarChart3, Database, LineChart, PieChart, Table2 } from 'lucide-react'
+import {
+  BarChart3,
+  Database,
+  LineChart,
+  PieChart,
+  Table2,
+  TrendingUp
+} from 'lucide-react'
 
 import { cn } from '@/lib/utils'
 import type { ChartArtifact } from '@/types/os'
@@ -78,6 +85,7 @@ const buildChartOption = (artifact: ChartArtifact) => {
       : undefined,
     legend: showLegend
       ? {
+          type: 'scroll',
           bottom: 0,
           itemWidth: 10,
           itemHeight: 10,
@@ -107,7 +115,9 @@ const buildChartOption = (artifact: ChartArtifact) => {
           label: {
             color: '#d7dde7',
             formatter: '{b}',
-            fontSize: 11
+            fontSize: 11,
+            overflow: 'truncate',
+            width: 96
           },
           data: artifact.data.map((row) => ({
             name: String(row[labelField] ?? ''),
@@ -180,6 +190,40 @@ const MetricArtifact = ({ artifact }: { artifact: ChartArtifact }) => {
   )
 }
 
+const DashboardMetricArtifact = ({ artifact }: { artifact: ChartArtifact }) => {
+  const valueField = getField(artifact, 'value')
+  const labelField = getField(artifact, 'label')
+  const row = artifact.data[0] ?? {}
+  const label = row[labelField] ? String(row[labelField]) : artifact.title
+
+  return (
+    <section
+      data-dashboard-card="true"
+      className="relative overflow-hidden rounded-lg border border-white/10 bg-[#101722] p-4 shadow-[0_16px_36px_rgba(0,0,0,0.18)]"
+    >
+      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-sky-300/50 to-transparent" />
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-xs font-medium uppercase text-slate-400">
+            {label}
+          </p>
+          <p className="mt-3 text-3xl font-semibold tracking-normal text-white">
+            {formatValue(row[valueField])}
+          </p>
+        </div>
+        <span className="rounded-md border border-white/10 bg-white/[0.04] p-2 text-sky-200">
+          <TrendingUp className="h-4 w-4" />
+        </span>
+      </div>
+      {artifact.insight && (
+        <p className="mt-3 line-clamp-2 text-xs leading-5 text-slate-400">
+          {artifact.insight}
+        </p>
+      )}
+    </section>
+  )
+}
+
 const TableArtifact = ({ artifact }: { artifact: ChartArtifact }) => {
   const fields = Object.keys(artifact.data[0] ?? {})
 
@@ -221,26 +265,45 @@ const EChart = ({ artifact }: { artifact: ChartArtifact }) => {
   const option = useMemo(() => buildChartOption(artifact), [artifact])
 
   return (
-    <ReactECharts
-      className="h-72 w-full"
-      option={option}
-      opts={{ renderer: 'svg' }}
-      notMerge
-      lazyUpdate
-    />
+    <div className="dashboard-chart-frame">
+      <ReactECharts
+        className="h-72 w-full"
+        option={option}
+        opts={{ renderer: 'svg' }}
+        notMerge
+        lazyUpdate
+      />
+    </div>
   )
 }
 
-const ChartArtifactCard = ({ artifact }: { artifact: ChartArtifact }) => {
+const ChartArtifactCard = ({
+  artifact,
+  variant = 'standalone'
+}: {
+  artifact: ChartArtifact
+  variant?: 'standalone' | 'dashboard'
+}) => {
   const Icon = chartIcon[artifact.chart_type]
+  const isDashboard = variant === 'dashboard'
+
+  if (isDashboard && artifact.chart_type === 'metric') {
+    return <DashboardMetricArtifact artifact={artifact} />
+  }
 
   return (
-    <section className="w-full max-w-3xl overflow-hidden rounded-lg border border-primary/10 bg-[#0b1018] text-primary shadow-[0_18px_55px_rgba(0,0,0,0.28)]">
-      <div className="border-b border-primary/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),rgba(255,255,255,0))] px-4 py-3">
+    <section
+      data-dashboard-card="true"
+      className={cn(
+        'w-full overflow-hidden rounded-lg border border-white/10 bg-[#0b1018] text-primary shadow-[0_18px_55px_rgba(0,0,0,0.24)]',
+        !isDashboard && 'max-w-3xl'
+      )}
+    >
+      <div className="border-b border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.06),rgba(255,255,255,0))] px-4 py-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="rounded-md border border-primary/10 bg-primary/5 p-1.5 text-primary">
+              <span className="rounded-md border border-white/10 bg-white/[0.04] p-1.5 text-sky-100">
                 <Icon className="h-4 w-4" />
               </span>
               <h3 className="truncate text-sm font-semibold text-primary">
@@ -253,13 +316,14 @@ const ChartArtifactCard = ({ artifact }: { artifact: ChartArtifact }) => {
               </p>
             )}
           </div>
-          <span className="shrink-0 rounded-full border border-primary/10 px-2 py-1 text-[10px] uppercase text-secondary">
+          <span className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] uppercase text-secondary">
             {artifact.chart_type}
           </span>
         </div>
       </div>
 
       <div
+        data-dashboard-card-body="true"
         className={cn('p-4', artifact.chart_type === 'metric' && 'grid gap-3')}
       >
         {artifact.chart_type === 'metric' && (
