@@ -233,6 +233,34 @@ export interface ImageData {
   url: string
 }
 
+export type ChartArtifactType = 'metric' | 'line' | 'bar' | 'pie' | 'table'
+
+export interface ChartArtifact {
+  kind: 'chart_artifact'
+  version: 1
+  artifact_id?: string
+  title: string
+  chart_type: ChartArtifactType
+  data: Array<Record<string, string | number | boolean | null>>
+  mapping?: {
+    x?: string
+    y?: string
+    label?: string
+    value?: string
+    series?: string
+  }
+  query?: {
+    sql?: string
+    explanation?: string
+  }
+  insight?: string
+  presentation?: {
+    color_scheme?: string
+    show_legend?: boolean
+    show_tooltip?: boolean
+  }
+}
+
 export interface VideoData {
   id: number
   eta: number

@@ -7,6 +7,11 @@ import Images from './Multimedia/Images'
 import Audios from './Multimedia/Audios'
 import { memo } from 'react'
 import AgentThinkingLoader from './AgentThinkingLoader'
+import ChartArtifactCard from './ChartArtifactCard'
+import {
+  parseChartArtifacts,
+  stripChartArtifactBlocks
+} from '@/lib/chartArtifacts'
 
 interface MessageProps {
   message: ChatMessage
@@ -27,9 +32,20 @@ const AgentMessage = ({ message }: MessageProps) => {
       </p>
     )
   } else if (message.content) {
+    const chartArtifacts = parseChartArtifacts(message.content)
+    const visibleContent = stripChartArtifactBlocks(message.content)
+
     messageContent = (
       <div className="flex w-full flex-col gap-4">
-        <MarkdownRenderer>{message.content}</MarkdownRenderer>
+        {visibleContent && (
+          <MarkdownRenderer>{visibleContent}</MarkdownRenderer>
+        )}
+        {chartArtifacts.map((artifact, index) => (
+          <ChartArtifactCard
+            key={`${artifact.artifact_id ?? artifact.title}-${index}`}
+            artifact={artifact}
+          />
+        ))}
         {message.videos && message.videos.length > 0 && (
           <Videos videos={message.videos} />
         )}
