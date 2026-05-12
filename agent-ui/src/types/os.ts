@@ -261,6 +261,34 @@ export interface ChartArtifact {
   }
 }
 
+export interface SavedDashboardCard {
+  id: string
+  dashboard_id: string
+  title: string
+  chart_type: ChartArtifactType
+  sql: string
+  mapping?: ChartArtifact['mapping']
+  presentation?: ChartArtifact['presentation']
+  insight?: string | null
+  last_result: ChartArtifact['data']
+  last_error?: string | null
+  last_run_at?: string | null
+  position?: Record<string, unknown>
+}
+
+export interface SavedDashboard {
+  id: string
+  owner_user_id: string
+  name: string
+  description?: string | null
+  source_session_id?: string | null
+  layout: Array<Record<string, unknown>>
+  cards?: SavedDashboardCard[]
+  card_count?: number
+  created_at?: string | null
+  updated_at?: string | null
+}
+
 export interface VideoData {
   id: number
   eta: number

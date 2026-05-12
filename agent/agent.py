@@ -2,12 +2,14 @@ import os
 import re
 import secrets
 from datetime import UTC, datetime, timedelta
+from typing import Any, Literal, Optional
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 import auth as auth_utils
+import dashboard_store
 import clickhouse_connect
 import jwt
 from agno.agent import Agent
@@ -24,7 +26,7 @@ from agno.vectordb.search import SearchType
 from fastapi import HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from tools.viz import VisualizationTools
 
 
@@ -57,6 +59,7 @@ print("Connected to Azure PostgreSQL (agent sessions)")
 
 # Ensure users table exists
 auth_utils.ensure_users_table(postgres_url)
+dashboard_store.ensure_dashboard_tables(postgres_url)
 
 # Knowledge Base mode:
 # - ENABLE_KNOWLEDGE_BASE=true  -> curated mode (uses pgvector knowledge)
@@ -263,6 +266,67 @@ def _validate_read_only_query(sql_query: str) -> tuple[bool, str]:
         )
 
     return True, ""
+
+
+def _validate_dashboard_query(sql_query: str) -> tuple[bool, str]:
+    stripped_query = sql_query.strip()
+    normalized_query = stripped_query[:-1].strip() if stripped_query.endswith(";") else stripped_query
+    query_upper = normalized_query.upper()
+
+    if ";" in normalized_query:
+        return False, "Only a single SQL statement is allowed."
+
+    if not query_upper.startswith("SELECT"):
+        return False, "Saved dashboard cards may only rerun SELECT queries."
+
+    if re.search(r"(?is)\bFORMAT\s+\w+\b", normalized_query):
+        return False, "FORMAT clauses are not allowed in saved dashboard queries."
+
+    if re.search(r"(?is)\bINTO\s+OUTFILE\b", normalized_query):
+        return False, "Export clauses are not allowed in saved dashboard queries."
+
+    is_valid, error_message = _validate_read_only_query(normalized_query)
+    if not is_valid:
+        return False, error_message
+
+    return True, ""
+
+
+def _clickhouse_rows_as_dicts(sql_query: str) -> list[dict]:
+    result = clickhouse_client.query(
+        _rewrite_allowed_table_references(sql_query),
+        settings={
+            "max_execution_time": 30,
+            "max_result_rows": 5000,
+            "result_overflow_mode": "break",
+        },
+    )
+    columns = [str(column) for column in result.column_names]
+    return [
+        {columns[index]: value for index, value in enumerate(row)}
+        for row in result.result_rows
+    ]
+
+
+def _get_authenticated_user_id(request: Request) -> str:
+    auth_header = request.headers.get("authorization", "")
+    scheme, _, token = auth_header.partition(" ")
+
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token missing subject")
+
+    return str(user_id)
 
 
 def _format_clickhouse_result(result) -> str:
@@ -589,6 +653,25 @@ class PasswordRecoveryRequest(BaseModel):
     recovery_key: str
 
 
+class DashboardCardRequest(BaseModel):
+    title: str
+    chart_type: Literal["metric", "line", "bar", "pie", "table"]
+    sql: str
+    mapping: dict[str, Any] = Field(default_factory=dict)
+    presentation: dict[str, Any] = Field(default_factory=dict)
+    insight: Optional[str] = None
+    last_result: list[dict[str, Any]] = Field(default_factory=list)
+    position: dict[str, Any] = Field(default_factory=dict)
+
+
+class CreateDashboardRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    source_session_id: Optional[str] = None
+    layout: list[dict[str, Any]] = Field(default_factory=list)
+    cards: list[DashboardCardRequest]
+
+
 @app.post("/auth/login")
 async def login(req: LoginRequest):
     """Authenticate a user and return a JWT."""
@@ -665,6 +748,111 @@ async def recover_password(req: PasswordRecoveryRequest):
         raise HTTPException(status_code=500, detail="Failed to update password")
 
     return {"message": "Password reset successful", "username": req.username}
+
+
+@app.post("/api/dashboards")
+async def create_saved_dashboard(req: CreateDashboardRequest, request: Request):
+    user_id = _get_authenticated_user_id(request)
+
+    if not req.cards:
+        raise HTTPException(status_code=400, detail="Dashboard must include at least one card.")
+
+    cards: list[dict[str, Any]] = []
+    for index, card in enumerate(req.cards):
+        sql_query = card.sql.strip()
+        is_valid, error_message = _validate_dashboard_query(sql_query)
+        if not is_valid:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Card '{card.title}' has unsafe SQL: {error_message}",
+            )
+
+        cards.append(
+            {
+                "title": card.title.strip() or f"Card {index + 1}",
+                "chart_type": card.chart_type,
+                "sql": sql_query,
+                "mapping": card.mapping,
+                "presentation": card.presentation,
+                "insight": card.insight,
+                "last_result": card.last_result,
+                "position": card.position or {"order": index},
+            }
+        )
+
+    return dashboard_store.create_dashboard(
+        postgres_url,
+        owner_user_id=user_id,
+        name=req.name.strip() or "Untitled dashboard",
+        description=req.description,
+        source_session_id=req.source_session_id,
+        layout=req.layout,
+        cards=cards,
+    )
+
+
+@app.get("/api/dashboards")
+async def list_saved_dashboards(request: Request):
+    user_id = _get_authenticated_user_id(request)
+    return {"data": dashboard_store.list_dashboards(postgres_url, owner_user_id=user_id)}
+
+
+@app.get("/api/dashboards/{dashboard_id}")
+async def get_saved_dashboard(dashboard_id: str, request: Request):
+    user_id = _get_authenticated_user_id(request)
+    dashboard = dashboard_store.get_dashboard(
+        postgres_url, dashboard_id=dashboard_id, owner_user_id=user_id
+    )
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+    return dashboard
+
+
+@app.post("/api/dashboards/{dashboard_id}/refresh")
+async def refresh_saved_dashboard(dashboard_id: str, request: Request):
+    user_id = _get_authenticated_user_id(request)
+    dashboard = dashboard_store.get_dashboard(
+        postgres_url, dashboard_id=dashboard_id, owner_user_id=user_id
+    )
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+
+    for card in dashboard["cards"]:
+        sql_query = str(card["sql"]).strip()
+        is_valid, error_message = _validate_dashboard_query(sql_query)
+
+        if not is_valid:
+            dashboard_store.update_card_result(
+                postgres_url,
+                dashboard_id=dashboard_id,
+                card_id=card["id"],
+                last_result=card.get("last_result") or [],
+                last_error=error_message,
+            )
+            continue
+
+        try:
+            rows = _clickhouse_rows_as_dicts(sql_query)
+            dashboard_store.update_card_result(
+                postgres_url,
+                dashboard_id=dashboard_id,
+                card_id=card["id"],
+                last_result=rows,
+                last_error=None,
+            )
+        except Exception as exc:
+            dashboard_store.update_card_result(
+                postgres_url,
+                dashboard_id=dashboard_id,
+                card_id=card["id"],
+                last_result=card.get("last_result") or [],
+                last_error=str(exc),
+            )
+
+    refreshed = dashboard_store.get_dashboard(
+        postgres_url, dashboard_id=dashboard_id, owner_user_id=user_id
+    )
+    return refreshed
 
 
 @app.get("/api/charts/{chart_id}")

@@ -1,17 +1,26 @@
 'use client'
 
 import { useMemo } from 'react'
-import { Download, LayoutDashboard } from 'lucide-react'
+import { Download, LayoutDashboard, Save } from 'lucide-react'
+import { useQueryState } from 'nuqs'
+import { toast } from 'sonner'
 
+import { createDashboardAPI } from '@/api/os'
 import { Button } from '@/components/ui/button'
+import { useStore } from '@/store'
 import type { ChartArtifact } from '@/types/os'
 import ChartArtifactCard from './ChartArtifactCard'
 
 const DashboardArtifactGroup = ({
-  artifacts
+  artifacts,
+  showSave = true
 }: {
   artifacts: ChartArtifact[]
+  showSave?: boolean
 }) => {
+  const selectedEndpoint = useStore((state) => state.selectedEndpoint)
+  const authToken = useStore((state) => state.authToken)
+  const [sessionId] = useQueryState('session')
   const dashboardId = useMemo(
     () =>
       `dashboard-${artifacts
@@ -30,6 +39,44 @@ const DashboardArtifactGroup = ({
 
   if (artifacts.length === 1) {
     return <ChartArtifactCard artifact={artifacts[0]} />
+  }
+
+  const handleSave = async () => {
+    const cards = artifacts
+      .map((artifact, index) => ({
+        title: artifact.title,
+        chart_type: artifact.chart_type,
+        sql: artifact.query?.sql?.trim() ?? '',
+        mapping: artifact.mapping,
+        presentation: artifact.presentation,
+        insight: artifact.insight,
+        last_result: artifact.data,
+        position: { order: index }
+      }))
+      .filter((card) => card.sql)
+
+    if (cards.length !== artifacts.length) {
+      toast.error(
+        'Every dashboard card needs saved SQL before it can be rerun.'
+      )
+      return
+    }
+
+    const name = window.prompt('Dashboard name', 'Ticket Analytics Dashboard')
+    if (!name) return
+
+    try {
+      await createDashboardAPI(selectedEndpoint, authToken, {
+        name,
+        source_session_id: sessionId,
+        cards
+      })
+      toast.success('Dashboard saved')
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : 'Failed to save dashboard'
+      )
+    }
   }
 
   const handlePrint = () => {
@@ -87,6 +134,17 @@ const DashboardArtifactGroup = ({
             <span className="rounded-full border border-white/10 bg-white/[0.03] px-3 py-1 text-[10px] uppercase text-slate-400">
               Interactive
             </span>
+            {showSave && (
+              <Button
+                className="h-8 border-white/10 bg-white/[0.04] px-3 text-xs text-slate-200 hover:bg-white/[0.08] hover:text-white"
+                type="button"
+                variant="outline"
+                onClick={handleSave}
+              >
+                <Save className="h-3.5 w-3.5" />
+                Save
+              </Button>
+            )}
             <Button
               className="h-8 border-white/10 bg-white/[0.04] px-3 text-xs text-slate-200 hover:bg-white/[0.08] hover:text-white"
               type="button"

@@ -34,6 +34,19 @@ const SettingsButton = () => (
   </Link>
 )
 
+const DashboardsButton = () => (
+  <Link href="/dashboards" className="w-full">
+    <Button
+      variant="ghost"
+      className="h-9 w-full justify-start gap-2 rounded-xl hover:bg-accent"
+      title="Saved dashboards"
+    >
+      <Icon type="sheet" size="xs" />
+      <span className="text-xs font-medium uppercase">Dashboards</span>
+    </Button>
+  </Link>
+)
+
 const UserFooter = ({
   username,
   userRole,
@@ -48,7 +61,7 @@ const UserFooter = ({
       <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-medium uppercase text-primary">
         {username[0]}
       </div>
-      <span className="truncate text-xs font-medium text-foreground">
+      <span className="text-foreground truncate text-xs font-medium">
         {username}
       </span>
       {userRole && (
@@ -188,10 +201,7 @@ const Sidebar = () => {
                 {isEndpointLoading ? (
                   <div className="flex w-full flex-col gap-2">
                     {Array.from({ length: 3 }).map((_, index) => (
-                      <Skeleton
-                        key={index}
-                        className="h-9 w-full rounded-xl"
-                      />
+                      <Skeleton key={index} className="h-9 w-full rounded-xl" />
                     ))}
                   </div>
                 ) : (
@@ -216,6 +226,7 @@ const Sidebar = () => {
               onLogout={handleLogout}
             />
           )}
+          <DashboardsButton />
           <SettingsButton />
         </div>
       </motion.div>

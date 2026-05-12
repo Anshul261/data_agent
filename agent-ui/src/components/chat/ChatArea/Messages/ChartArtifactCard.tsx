@@ -36,6 +36,23 @@ const getField = (
   return fields[0]
 }
 
+const getNumericValue = (row: Record<string, unknown>, preferred?: string) => {
+  if (preferred && row[preferred] !== undefined && row[preferred] !== null) {
+    return row[preferred]
+  }
+
+  const numericField = Object.entries(row).find(([, value]) => {
+    if (typeof value === 'number') return true
+    if (typeof value === 'string') {
+      const parsed = Number(value)
+      return !Number.isNaN(parsed)
+    }
+    return false
+  })
+
+  return numericField?.[1] ?? 0
+}
+
 const toNumber = (value: unknown) => {
   if (typeof value === 'number') return value
   if (typeof value === 'string') {
@@ -175,25 +192,25 @@ const chartIcon = {
 }
 
 const MetricArtifact = ({ artifact }: { artifact: ChartArtifact }) => {
-  const valueField = getField(artifact, 'value')
   const labelField = getField(artifact, 'label')
   const row = artifact.data[0] ?? {}
+  const value = getNumericValue(row, getField(artifact, 'value'))
   const label = row[labelField] ? String(row[labelField]) : artifact.title
 
   return (
     <div className="rounded-lg border border-primary/10 bg-background-secondary/50 p-4">
       <p className="text-xs uppercase text-secondary">{label}</p>
       <p className="mt-2 text-3xl font-semibold tracking-normal text-primary">
-        {formatValue(row[valueField])}
+        {formatValue(value)}
       </p>
     </div>
   )
 }
 
 const DashboardMetricArtifact = ({ artifact }: { artifact: ChartArtifact }) => {
-  const valueField = getField(artifact, 'value')
   const labelField = getField(artifact, 'label')
   const row = artifact.data[0] ?? {}
+  const value = getNumericValue(row, getField(artifact, 'value'))
   const label = row[labelField] ? String(row[labelField]) : artifact.title
 
   return (
@@ -208,7 +225,7 @@ const DashboardMetricArtifact = ({ artifact }: { artifact: ChartArtifact }) => {
             {label}
           </p>
           <p className="mt-3 text-3xl font-semibold tracking-normal text-white">
-            {formatValue(row[valueField])}
+            {formatValue(value)}
           </p>
         </div>
         <span className="rounded-md border border-white/10 bg-white/[0.04] p-2 text-sky-200">
