@@ -35,6 +35,7 @@ class VisualizationTools(Toolkit):
         enable_create_scatter_plot: bool = True,
         enable_create_histogram: bool = True,
         enable_create_chart_artifact: bool = True,
+        enable_create_json_render_artifact: bool = True,
         all: bool = False,
         **kwargs,
     ):
@@ -66,6 +67,8 @@ class VisualizationTools(Toolkit):
             tools.append(self.create_histogram)
         if enable_create_chart_artifact or all:
             tools.append(self.create_chart_artifact)
+        if enable_create_json_render_artifact or all:
+            tools.append(self.create_json_render_artifact)
 
         super().__init__(name="visualization_tools", tools=tools, **kwargs)
 
@@ -241,6 +244,173 @@ class VisualizationTools(Toolkit):
         }
 
         return "```chart-artifact\n" + json.dumps(artifact, indent=2, default=str) + "\n```"
+
+    def create_json_render_artifact(
+        self,
+        cards: Union[List[Dict[str, Any]], str],
+        title: str,
+        mode: str = "dashboard",
+        subtitle: str = "",
+        narrative: str = "",
+    ) -> str:
+        """
+        Create a dynamic json-render dashboard or report artifact for the UI.
+
+        Prefer this when users ask for dashboards, reports, PDFs, or multiple
+        visual components. The Next.js UI renders the returned json-render block
+        using a local component catalog, including Apache ECharts components.
+
+        Args:
+            cards: A list of card dictionaries, or a JSON string containing one.
+                Each card MUST follow this contract:
+                {
+                  "title": "Card title",
+                  "chart_type": "metric|line|bar|pie|table",
+                  "data": [{"field": "value"}],
+                  "mapping": {"x": "field", "y": "numeric_field", "label": "field", "value": "numeric_field"},
+                  "query": {"sql": "SELECT ...", "explanation": "What this measures"},
+                  "insight": "One short interpretation",
+                  "presentation": {"show_legend": false, "show_tooltip": true}
+                }
+            title: Dashboard/report title.
+            mode: Either dashboard or report.
+            subtitle: Optional subtitle shown under the title.
+            narrative: Optional markdown narrative rendered near the top.
+
+        Returns:
+            str: A fenced json-render JSON block rendered by the Next.js UI.
+        """
+        if isinstance(cards, str):
+            try:
+                cards = json.loads(cards)
+            except json.JSONDecodeError:
+                cards = []
+
+        if not isinstance(cards, list):
+            cards = []
+
+        normalized_mode = mode.strip().lower()
+        if normalized_mode not in {"dashboard", "report"}:
+            normalized_mode = "dashboard"
+
+        artifact_id = str(uuid.uuid4())
+        root_id = f"{normalized_mode}-{artifact_id}"
+        elements: Dict[str, Dict[str, Any]] = {
+            root_id: {
+                "type": "Report" if normalized_mode == "report" else "Dashboard",
+                "props": {
+                    "title": title,
+                    "subtitle": subtitle or (
+                        "Generated analytics report"
+                        if normalized_mode == "report"
+                        else "Generated analytics dashboard"
+                    ),
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "children": [],
+            }
+        }
+
+        if narrative:
+            narrative_id = f"narrative-{artifact_id}"
+            elements[narrative_id] = {
+                "type": "MarkdownText",
+                "props": {"content": narrative},
+            }
+            elements[root_id]["children"].append(narrative_id)
+
+        metric_ids: List[str] = []
+        visual_ids: List[str] = []
+        artifact_cards: List[Dict[str, Any]] = []
+        allowed_types = {"metric", "line", "bar", "pie", "table"}
+
+        for index, raw_card in enumerate(cards):
+            if not isinstance(raw_card, dict):
+                continue
+
+            chart_type = str(raw_card.get("chart_type") or "bar").strip().lower()
+            if chart_type not in allowed_types:
+                chart_type = "bar"
+
+            rows = self._normalize_data_for_artifacts(raw_card.get("data") or [])
+            fields = list(rows[0].keys()) if rows else []
+            mapping = raw_card.get("mapping") if isinstance(raw_card.get("mapping"), dict) else {}
+            label = mapping.get("label") or mapping.get("x") or (fields[0] if fields else "label")
+            value = mapping.get("value") or mapping.get("y") or (fields[1] if len(fields) > 1 else label)
+            normalized_mapping = {
+                "x": mapping.get("x") or label,
+                "y": mapping.get("y") or value,
+                "label": label,
+                "value": value,
+            }
+
+            card_id = str(raw_card.get("artifact_id") or uuid.uuid4())
+            title_value = str(raw_card.get("title") or f"Card {index + 1}")
+            card = {
+                "kind": "chart_artifact",
+                "version": 1,
+                "artifact_id": card_id,
+                "title": title_value,
+                "chart_type": chart_type,
+                "data": rows,
+                "mapping": normalized_mapping,
+                "query": raw_card.get("query") if isinstance(raw_card.get("query"), dict) else {},
+                "insight": str(raw_card.get("insight") or ""),
+                "presentation": raw_card.get("presentation") if isinstance(raw_card.get("presentation"), dict) else {},
+            }
+            artifact_cards.append(card)
+
+            element_type = "Metric" if chart_type == "metric" else "DataTable" if chart_type == "table" else "EChart"
+            element_id = f"{element_type.lower()}-{card_id}"
+            elements[element_id] = {
+                "type": element_type,
+                "props": card,
+            }
+            if chart_type == "metric":
+                metric_ids.append(element_id)
+            else:
+                visual_ids.append(element_id)
+
+        if metric_ids:
+            metric_grid_id = f"metrics-{artifact_id}"
+            elements[metric_grid_id] = {
+                "type": "Grid",
+                "props": {"columns": min(4, max(1, len(metric_ids)))},
+                "children": metric_ids,
+            }
+            elements[root_id]["children"].append(metric_grid_id)
+
+        if visual_ids:
+            visual_grid_id = f"visuals-{artifact_id}"
+            elements[visual_grid_id] = {
+                "type": "Grid",
+                "props": {"columns": 1 if normalized_mode == "report" else 2},
+                "children": visual_ids,
+            }
+            elements[root_id]["children"].append(visual_grid_id)
+
+        artifact = {
+            "kind": "json_render",
+            "version": 1,
+            "artifact_id": artifact_id,
+            "title": title,
+            "mode": normalized_mode,
+            "spec": {
+                "root": root_id,
+                "elements": elements,
+            },
+            "cards": artifact_cards,
+            "queries": [
+                {
+                    "id": card["artifact_id"],
+                    "sql": card.get("query", {}).get("sql", ""),
+                    "explanation": card.get("query", {}).get("explanation", ""),
+                }
+                for card in artifact_cards
+            ],
+        }
+
+        return "```json-render\n" + json.dumps(artifact, indent=2, default=str) + "\n```"
 
     def create_bar_chart(
         self,

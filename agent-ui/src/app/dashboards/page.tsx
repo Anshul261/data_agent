@@ -18,10 +18,15 @@ import {
   refreshDashboardAPI
 } from '@/api/os'
 import DashboardArtifactGroup from '@/components/chat/ChatArea/Messages/DashboardArtifactGroup'
+import JsonRenderArtifactGroup from '@/components/render/JsonRenderArtifactGroup'
 import { Button } from '@/components/ui/button'
 import { useAuthGuard } from '@/hooks/useAuthGuard'
+import {
+  hydrateJsonRenderArtifactCards,
+  isJsonRenderLayoutArtifact
+} from '@/lib/renderArtifacts'
 import { useStore } from '@/store'
-import type { ChartArtifact, SavedDashboard } from '@/types/os'
+import type { ChartArtifact, JsonRenderArtifact, SavedDashboard } from '@/types/os'
 import { cn } from '@/lib/utils'
 
 const dashboardToArtifacts = (dashboard: SavedDashboard): ChartArtifact[] =>
@@ -42,6 +47,18 @@ const dashboardToArtifacts = (dashboard: SavedDashboard): ChartArtifact[] =>
       : (card.insight ?? undefined),
     presentation: card.presentation
   }))
+
+const dashboardToRenderArtifact = (
+  dashboard: SavedDashboard
+): JsonRenderArtifact | null => {
+  const layoutArtifact = dashboard.layout.find(isJsonRenderLayoutArtifact)
+  if (!layoutArtifact) return null
+
+  return hydrateJsonRenderArtifactCards(
+    layoutArtifact,
+    dashboardToArtifacts(dashboard)
+  )
+}
 
 const DashboardPageContent = () => {
   const { isAuthenticated } = useAuthGuard()
@@ -88,6 +105,11 @@ const DashboardPageContent = () => {
 
   const artifacts = useMemo(
     () => (selectedDashboard ? dashboardToArtifacts(selectedDashboard) : []),
+    [selectedDashboard]
+  )
+  const renderArtifact = useMemo(
+    () =>
+      selectedDashboard ? dashboardToRenderArtifact(selectedDashboard) : null,
     [selectedDashboard]
   )
 
@@ -292,7 +314,12 @@ const DashboardPageContent = () => {
             </Button>
           </div>
 
-          {selectedDashboard && artifacts.length > 0 ? (
+          {selectedDashboard && renderArtifact ? (
+            <JsonRenderArtifactGroup
+              artifact={renderArtifact}
+              showSave={false}
+            />
+          ) : selectedDashboard && artifacts.length > 0 ? (
             <DashboardArtifactGroup artifacts={artifacts} showSave={false} />
           ) : (
             <div className="flex h-[60vh] items-center justify-center rounded-xl border border-border/60 bg-background-secondary/20 text-sm text-secondary">

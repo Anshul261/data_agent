@@ -180,6 +180,7 @@ export const createDashboardAPI = async (
     name: string
     description?: string
     source_session_id?: string | null
+    layout?: Array<Record<string, unknown>>
     cards: Array<{
       title: string
       chart_type: ChartArtifact['chart_type']

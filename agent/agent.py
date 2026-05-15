@@ -483,16 +483,21 @@ knowledge_instructions = [
 chart_instructions = [
     "When the user asks for a chart, visualization, or graph:",
     "1. First query the data from ClickHouse using execute_clickhouse_query",
-    "2. Prefer create_chart_artifact with the query results, chart type, title, field mappings, SQL, and a short insight so the UI can render a professional interactive dashboard card",
-    "3. Include the returned ```chart-artifact``` block exactly in your response. Do not rewrite or summarize the JSON inside that block",
-    "4. Use the PNG chart tools only as a fallback when an image is explicitly requested or the artifact tool is not suitable. If using a PNG chart tool, include it with markdown image syntax: ![Chart Title](chart_url)",
-    "5. Provide a brief interpretation of the chart alongside it",
+    "2. For dashboards, reports, PDF-ready outputs, or multiple visual components, prefer create_json_render_artifact so the UI can render a dynamic json-render document with Apache ECharts components",
+    "3. For a single simple chart, use create_chart_artifact with the query results, chart type, title, field mappings, SQL, and a short insight",
+    "4. Include the returned ```json-render``` or ```chart-artifact``` block exactly in your response. Do not rewrite or summarize the JSON inside that block",
+    "5. Use the PNG chart tools only as a fallback when an image is explicitly requested or the artifact tool is not suitable. If using a PNG chart tool, include it with markdown image syntax: ![Chart Title](chart_url)",
+    "6. Provide a brief interpretation of the chart alongside it",
+    "When the user asks for a report or PDF, create a json-render artifact with mode='report', a concise narrative, metrics/charts/tables as cards, and SQL included in each card query so it can be saved and refreshed.",
+    "json-render card contract: every card passed to create_json_render_artifact must include title, chart_type, data rows, mapping, query.sql, query.explanation, insight, and presentation. Use chart_type metric for one KPI value, line for time series, bar for category comparison, pie for proportions, and table for detailed rows.",
+    "The UI catalog only supports these json-render component types: Dashboard, Report, Section, Grid, Card, Metric, EChart, DataTable, Insight, MarkdownText, Divider, PageBreak. Do not invent component names.",
+    "The UI applies its own card styling. Do not ask for colors, CSS, HTML, or arbitrary layouts; provide semantic cards and let json-render match the dashboard/report style.",
     "Choose chart types wisely: bar charts for categories, line charts for trends over time, pie charts for proportions, scatter plots for correlations, histograms for distributions.",
     "When the user asks to modify or update a previous chart (e.g. 'make it a pie chart', 'show only last 6 months', 'sort by count', 'add more categories'):",
     "1. Check the conversation history for the data that was already queried",
-    "2. If the same data can be reused with a different chart type or parameters, call create_chart_artifact directly with that data — do NOT re-query ClickHouse",
+    "2. If the same data can be reused with a different chart type or parameters, call create_json_render_artifact or create_chart_artifact directly with that data — do NOT re-query ClickHouse",
     "3. If the modification requires different or filtered data (e.g. different time range, different grouping), run a new query first",
-    "4. Always embed the updated chart with ![Chart Title](chart_url) and briefly note what changed",
+    "4. Always include the updated artifact block and briefly note what changed",
 ]
 
 agent_instructions = [*base_instructions]

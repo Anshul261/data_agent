@@ -1,3 +1,5 @@
+import type { VisibilityCondition } from '@json-render/core'
+
 export interface ToolCall {
   role: 'user' | 'tool' | 'system' | 'assistant'
   content: string | null
@@ -259,6 +261,34 @@ export interface ChartArtifact {
     show_legend?: boolean
     show_tooltip?: boolean
   }
+}
+
+export interface JsonRenderElement {
+  type: string
+  props: Record<string, unknown>
+  children?: string[]
+  visible?: VisibilityCondition
+}
+
+export interface JsonRenderSpec extends Record<string, unknown> {
+  root: string
+  elements: Record<string, JsonRenderElement>
+  state?: Record<string, unknown>
+}
+
+export interface JsonRenderArtifact extends Record<string, unknown> {
+  kind: 'json_render'
+  version: 1
+  artifact_id?: string
+  title: string
+  mode?: 'dashboard' | 'report'
+  spec: JsonRenderSpec
+  cards?: ChartArtifact[]
+  queries?: Array<{
+    id?: string
+    sql?: string
+    explanation?: string
+  }>
 }
 
 export interface SavedDashboardCard {
