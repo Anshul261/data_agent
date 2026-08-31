@@ -6,7 +6,17 @@ from typing import Any, Dict, List, Optional, Union
 
 from agno.tools import Toolkit
 from agno.utils.log import log_info, logger
-from sqlalchemy import Column, DateTime, LargeBinary, String, create_engine
+
+from request_context import get_current_user_id
+from sqlalchemy import (
+    Column,
+    DateTime,
+    LargeBinary,
+    String,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Session
 
 
@@ -18,6 +28,7 @@ class _Chart(_Base):
     __tablename__ = "charts"
 
     id = Column(String(36), primary_key=True)
+    owner_user_id = Column(String(36), index=True)
     chart_type = Column(String(50), nullable=False)
     title = Column(String(500), nullable=False)
     image_data = Column(LargeBinary, nullable=False)
@@ -53,6 +64,7 @@ class VisualizationTools(Toolkit):
             pool_recycle=1800,    # recycle connections every 30 min
         )
         _Base.metadata.create_all(self._engine)
+        self._ensure_owner_column()
 
         tools: List[Any] = []
         if enable_create_bar_chart or all:
@@ -71,6 +83,31 @@ class VisualizationTools(Toolkit):
             tools.append(self.create_json_render_artifact)
 
         super().__init__(name="visualization_tools", tools=tools, **kwargs)
+
+    def _ensure_owner_column(self) -> None:
+        """
+        Add owner_user_id to a charts table created before ownership existed.
+
+        Pre-existing rows keep a NULL owner and are therefore unreachable
+        over HTTP, which is the intended outcome: their owner is unknowable,
+        so they cannot be safely served to anyone.
+        """
+        columns = {
+            column["name"] for column in inspect(self._engine).get_columns("charts")
+        }
+        if "owner_user_id" in columns:
+            return
+
+        with self._engine.begin() as conn:
+            conn.execute(
+                text("ALTER TABLE charts ADD COLUMN owner_user_id VARCHAR(36)")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_charts_owner "
+                    "ON charts(owner_user_id)"
+                )
+            )
 
     def _apply_style(self):
         import matplotlib.pyplot as plt
@@ -92,6 +129,7 @@ class VisualizationTools(Toolkit):
         chart_id = str(uuid.uuid4())
         chart = _Chart(
             id=chart_id,
+            owner_user_id=get_current_user_id(),
             chart_type=chart_type,
             title=title,
             image_data=png_bytes,
@@ -104,14 +142,30 @@ class VisualizationTools(Toolkit):
     def _get_chart_url(self, chart_id: str) -> str:
         return f"{self.base_url}/api/charts/{chart_id}"
 
-    def get_chart_bytes(self, chart_id: str) -> Optional[bytes]:
-        """Retrieve chart PNG bytes by ID. Returns None if not found."""
+    def get_chart_bytes(self, chart_id: str, owner_user_id: str) -> Optional[bytes]:
+        """
+        Retrieve chart PNG bytes for one owner.
+
+        Returns None when the chart does not exist or belongs to someone
+        else, so callers cannot distinguish the two cases.
+        """
+        if not owner_user_id:
+            return None
         try:
             with Session(self._engine) as session:
-                chart = session.get(_Chart, chart_id)
+                chart = (
+                    session.query(_Chart)
+                    .filter(
+                        _Chart.id == chart_id,
+                        _Chart.owner_user_id == owner_user_id,
+                    )
+                    .first()
+                )
                 if chart:
                     return bytes(chart.image_data)
-                logger.warning(f"Chart {chart_id} not found in database")
+                logger.warning(
+                    f"Chart {chart_id} not found for the requesting user"
+                )
                 return None
         except Exception as e:
             logger.error(f"Error retrieving chart {chart_id}: {e}")

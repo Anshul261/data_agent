@@ -14,6 +14,7 @@ import auth as auth_utils
 import clickhouse_connect
 import dashboard_store
 import jwt
+import request_context
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
 from agno.guardrails import PIIDetectionGuardrail, PromptInjectionGuardrail
@@ -403,6 +404,49 @@ def _require_scope(request: Request, required_scope: str) -> dict[str, Any]:
     return claims
 
 
+def _user_id_from_headers(headers) -> Optional[str]:
+    """Best-effort user id from a bearer token; None if absent or invalid."""
+    for key, value in headers:
+        if key != b"authorization":
+            continue
+        scheme, _, token = value.decode("latin-1").partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return None
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        except jwt.InvalidTokenError:
+            return None
+        subject = payload.get("sub")
+        return str(subject) if subject else None
+    return None
+
+
+class UserContextMiddleware:
+    """
+    Publish the authenticated user id for the duration of the request.
+
+    Charts are written from inside Agno tool calls, which have no access to
+    the Request. This lets _save_chart stamp the correct owner without
+    threading user identity through Agno.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        token = request_context.set_current_user_id(
+            _user_id_from_headers(scope.get("headers", []))
+        )
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            request_context.reset_current_user_id(token)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -736,6 +780,7 @@ app.middleware_stack = None  # force rebuild on next request
 # CORSMiddleware (outermost) responds to OPTIONS preflight requests
 # with the correct Allow-Origin headers before JWT ever sees them.
 # JWTMiddleware then validates the token on every non-OPTIONS request.
+app.add_middleware(UserContextMiddleware)
 app.add_middleware(
     JWTMiddleware,
     secret_key=JWT_SECRET,
@@ -1055,8 +1100,8 @@ async def refresh_saved_dashboard(dashboard_id: str, request: Request):
 @app.get("/api/charts/{chart_id}")
 async def serve_chart(chart_id: str, request: Request):
     """Serve a chart image by its UUID, to authenticated callers only."""
-    _require_scope(request, "sessions:read")
-    image_data = viz_tools.get_chart_bytes(chart_id)
+    claims = _require_scope(request, "sessions:read")
+    image_data = viz_tools.get_chart_bytes(chart_id, str(claims["sub"]))
     if image_data is None:
         raise HTTPException(status_code=404, detail="Chart not found")
     return Response(
