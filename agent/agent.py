@@ -156,7 +156,7 @@ ALLOWED_TABLE_NAME = os.getenv("CLICKHOUSE_ALLOWED_TABLE", "LLM_access_tickets")
 CLICKHOUSE_MAX_EXECUTION_TIME = env_int("CLICKHOUSE_MAX_EXECUTION_TIME", 60)
 AGENT_CLICKHOUSE_MAX_RESULT_ROWS = env_int("AGENT_CLICKHOUSE_MAX_RESULT_ROWS", 5000)
 DASHBOARD_CLICKHOUSE_MAX_RESULT_ROWS = env_int(
-    "DASHBOARD_CLICKHOUSE_MAX_RESULT_ROWS", 0
+    "DASHBOARD_CLICKHOUSE_MAX_RESULT_ROWS", 5000
 )
 AGENT_TOOL_CALL_LIMIT = env_int("AGENT_TOOL_CALL_LIMIT", 12)
 READ_ONLY_PREFIXES = ("SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN")
@@ -584,7 +584,7 @@ def get_table_schema(table_name: str) -> str:
 llm = AzureOpenAI(
     id=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_5", "gpt-4.1-mini"),
     api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-    api_version=os.getenv("2025-04-01-preview", "2024-02-15-preview"),
+    api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview"),
     azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT_5"),
     azure_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT_NAME_5"),
 )
@@ -707,12 +707,9 @@ def main():
             print("\n\nSession interrupted. Goodbye!")
             break
         except Exception as e:
-            print(f"\nError: {e}")
             import traceback
 
             print(f"\nError: {e}")
-            import traceback
-
             traceback.print_exc()
 
             print("\nPlease try again or type 'exit' to quit.")
@@ -751,7 +748,6 @@ app.add_middleware(
         "/docs/oauth2-redirect",
         "/redoc",
         "/openapi.json",
-        "/api/charts/*",
         "/auth/login",
         "/auth/bootstrap",
         "/auth/recover",
@@ -1024,6 +1020,7 @@ async def refresh_saved_dashboard(dashboard_id: str, request: Request):
                 postgres_url,
                 dashboard_id=dashboard_id,
                 card_id=card["id"],
+                owner_user_id=user_id,
                 last_result=card.get("last_result") or [],
                 last_error=error_message,
             )
@@ -1035,6 +1032,7 @@ async def refresh_saved_dashboard(dashboard_id: str, request: Request):
                 postgres_url,
                 dashboard_id=dashboard_id,
                 card_id=card["id"],
+                owner_user_id=user_id,
                 last_result=rows,
                 last_error=None,
             )
@@ -1043,6 +1041,7 @@ async def refresh_saved_dashboard(dashboard_id: str, request: Request):
                 postgres_url,
                 dashboard_id=dashboard_id,
                 card_id=card["id"],
+                owner_user_id=user_id,
                 last_result=card.get("last_result") or [],
                 last_error=str(exc),
             )
@@ -1054,15 +1053,16 @@ async def refresh_saved_dashboard(dashboard_id: str, request: Request):
 
 
 @app.get("/api/charts/{chart_id}")
-async def serve_chart(chart_id: str):
-    """Serve a chart image from SQLite by its UUID."""
+async def serve_chart(chart_id: str, request: Request):
+    """Serve a chart image by its UUID, to authenticated callers only."""
+    _require_scope(request, "sessions:read")
     image_data = viz_tools.get_chart_bytes(chart_id)
     if image_data is None:
         raise HTTPException(status_code=404, detail="Chart not found")
     return Response(
         content=image_data,
         media_type="image/png",
-        headers={"Cache-Control": "public, max-age=86400"},
+        headers={"Cache-Control": "private, max-age=86400"},
     )
 
 

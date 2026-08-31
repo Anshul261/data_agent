@@ -5,6 +5,7 @@ import { useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 
+import { useAuthedImage } from '@/hooks/useAuthedImage'
 import { cn } from '@/lib/utils'
 
 import type {
@@ -152,12 +153,13 @@ const Img = ({ src, alt }: ImgProps) => {
   const [error, setError] = useState(false)
 
   const strSrc = typeof src === 'string' ? src : null
+  const { src: resolvedSrc, error: authError } = useAuthedImage(strSrc)
 
   if (!strSrc) return null
 
   return (
     <div className="w-full max-w-xl">
-      {error ? (
+      {error || authError ? (
         <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-md bg-secondary/50 text-muted">
           <Paragraph className="text-primary">Image unavailable</Paragraph>
           <Link
@@ -170,7 +172,7 @@ const Img = ({ src, alt }: ImgProps) => {
         </div>
       ) : (
         <Image
-          src={strSrc}
+          src={resolvedSrc ?? strSrc}
           width={96}
           height={56}
           alt={alt ?? 'Rendered image'}

@@ -1,6 +1,13 @@
 'use client'
 
-import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from 'react'
 import Link from 'next/link'
 import {
   ChevronLeft,
@@ -71,6 +78,8 @@ const DashboardPageContent = () => {
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [isNavCollapsed, setIsNavCollapsed] = useState(false)
   const [isListCollapsed, setIsListCollapsed] = useState(false)
+  // Auto-select the first dashboard once, rather than on every list load.
+  const hasAutoSelected = useRef(false)
 
   const loadDashboards = useCallback(async () => {
     if (!authToken) return
@@ -80,7 +89,8 @@ const DashboardPageContent = () => {
       const items = await listDashboardsAPI(selectedEndpoint, authToken)
       setDashboards(items)
 
-      if (!selectedDashboard && items[0]) {
+      if (!hasAutoSelected.current && items[0]) {
+        hasAutoSelected.current = true
         const detail = await getDashboardAPI(
           selectedEndpoint,
           authToken,
@@ -95,7 +105,7 @@ const DashboardPageContent = () => {
     } finally {
       setIsLoading(false)
     }
-  }, [authToken, selectedDashboard, selectedEndpoint])
+  }, [authToken, selectedEndpoint])
 
   useEffect(() => {
     if (isAuthenticated) {

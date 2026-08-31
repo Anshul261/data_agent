@@ -1,9 +1,21 @@
 import bcrypt
+from functools import lru_cache
 from sqlalchemy import create_engine, text
 from typing import Optional
 
 _ENGINE_KWARGS = {"pool_pre_ping": True, "pool_recycle": 1800}
 _ALLOWED_ROLES = {"admin", "user"}
+
+
+@lru_cache(maxsize=None)
+def _get_engine(db_url: str):
+    """
+    One pooled engine per database URL, reused for the process lifetime.
+
+    Building an engine per call opened a fresh TCP+TLS connection to Azure
+    Postgres every time and made the pool settings above dead configuration.
+    """
+    return create_engine(db_url, **_ENGINE_KWARGS)
 
 
 def hash_password(plain: str) -> str:
@@ -21,7 +33,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def ensure_users_table(db_url: str) -> None:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     with engine.connect() as conn:
         conn.execute(text("""
             CREATE TABLE IF NOT EXISTS users (
@@ -33,17 +45,15 @@ def ensure_users_table(db_url: str) -> None:
             )
         """))
         conn.commit()
-    engine.dispose()
 
 
 def get_user(username: str, db_url: str) -> Optional[dict]:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT id::text, username, hashed_password, role FROM users WHERE username = :username"),
             {"username": username},
         ).fetchone()
-    engine.dispose()
     if row is None:
         return None
     return {"id": row[0], "username": row[1], "hashed_password": row[2], "role": row[3]}
@@ -55,7 +65,7 @@ def create_user(username: str, password: str, role: str, db_url: str) -> dict:
         raise ValueError("Username must be between 1 and 50 characters")
     if role not in _ALLOWED_ROLES:
         raise ValueError("Invalid user role")
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     hashed = hash_password(password)
     with engine.connect() as conn:
         row = conn.execute(
@@ -67,13 +77,12 @@ def create_user(username: str, password: str, role: str, db_url: str) -> dict:
             {"username": username, "hashed": hashed, "role": role},
         ).fetchone()
         conn.commit()
-    engine.dispose()
     return {"id": row[0], "username": row[1], "role": row[2]}
 
 
 def update_user_password(username: str, password: str, db_url: str) -> bool:
     username = username.strip()
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     hashed = hash_password(password)
     with engine.connect() as conn:
         result = conn.execute(
@@ -85,15 +94,13 @@ def update_user_password(username: str, password: str, db_url: str) -> bool:
             {"username": username, "hashed": hashed},
         )
         conn.commit()
-    engine.dispose()
     return result.rowcount > 0
 
 
 def admin_exists(db_url: str) -> bool:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     with engine.connect() as conn:
         row = conn.execute(
             text("SELECT COUNT(*) FROM users WHERE role = 'admin'")
         ).fetchone()
-    engine.dispose()
     return (row[0] if row else 0) > 0

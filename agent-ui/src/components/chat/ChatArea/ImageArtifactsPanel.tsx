@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
+import AuthedImage from '@/components/ui/AuthedImage'
 import { parseChartArtifacts } from '@/lib/chartArtifacts'
 import { cn } from '@/lib/utils'
 import { useStore } from '@/store'
@@ -187,8 +188,7 @@ const ImageArtifactsPanel = () => {
                     </div>
                   ) : (
                     <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
+                      <AuthedImage
                         src={artifact.url}
                         alt={artifact.alt}
                         className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
@@ -257,8 +257,7 @@ const ImageArtifactsPanel = () => {
                   }}
                 >
                   {artifact.artifactType === 'image' ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
+                    <AuthedImage
                       src={artifact.url}
                       alt={artifact.alt}
                       className="aspect-[4/3] w-full object-cover"

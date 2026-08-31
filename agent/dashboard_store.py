@@ -1,4 +1,5 @@
 import uuid
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -8,12 +9,23 @@ from sqlalchemy import create_engine, text
 _ENGINE_KWARGS = {"pool_pre_ping": True, "pool_recycle": 1800}
 
 
+@lru_cache(maxsize=None)
+def _get_engine(db_url: str):
+    """
+    One pooled engine per database URL, reused for the process lifetime.
+
+    Building an engine per call opened a fresh TCP+TLS connection to Azure
+    Postgres every time and made the pool settings above dead configuration.
+    """
+    return create_engine(db_url, **_ENGINE_KWARGS)
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def ensure_dashboard_tables(db_url: str) -> None:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     with engine.connect() as conn:
         conn.execute(
             text(
@@ -62,7 +74,6 @@ def ensure_dashboard_tables(db_url: str) -> None:
             )
         )
         conn.commit()
-    engine.dispose()
 
 
 def _row_to_dashboard(row: Any) -> dict[str, Any]:
@@ -107,7 +118,7 @@ def create_dashboard(
     layout: list[dict[str, Any]],
     cards: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     dashboard_id = str(uuid.uuid4())
     with engine.connect() as conn:
         dashboard_row = conn.execute(
@@ -167,7 +178,6 @@ def create_dashboard(
 
         conn.commit()
 
-    engine.dispose()
     return {
         **_row_to_dashboard(dashboard_row),
         "cards": [_row_to_card(row) for row in card_rows],
@@ -175,7 +185,7 @@ def create_dashboard(
 
 
 def list_dashboards(db_url: str, *, owner_user_id: str) -> list[dict[str, Any]]:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     with engine.connect() as conn:
         rows = conn.execute(
             text(
@@ -190,7 +200,6 @@ def list_dashboards(db_url: str, *, owner_user_id: str) -> list[dict[str, Any]]:
             ),
             {"owner_user_id": owner_user_id},
         ).fetchall()
-    engine.dispose()
 
     dashboards = []
     for row in rows:
@@ -203,7 +212,7 @@ def list_dashboards(db_url: str, *, owner_user_id: str) -> list[dict[str, Any]]:
 def get_dashboard(
     db_url: str, *, dashboard_id: str, owner_user_id: str
 ) -> Optional[dict[str, Any]]:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+    engine = _get_engine(db_url)
     with engine.connect() as conn:
         dashboard_row = conn.execute(
             text(
@@ -217,7 +226,6 @@ def get_dashboard(
         ).fetchone()
 
         if not dashboard_row:
-            engine.dispose()
             return None
 
         card_rows = conn.execute(
@@ -232,7 +240,6 @@ def get_dashboard(
             {"dashboard_id": dashboard_id},
         ).fetchall()
 
-    engine.dispose()
     return {
         **_row_to_dashboard(dashboard_row),
         "cards": [_row_to_card(row) for row in card_rows],
@@ -244,10 +251,11 @@ def update_card_result(
     *,
     dashboard_id: str,
     card_id: str,
+    owner_user_id: str,
     last_result: list[dict[str, Any]],
     last_error: Optional[str],
-) -> dict[str, Any]:
-    engine = create_engine(db_url, **_ENGINE_KWARGS)
+) -> Optional[dict[str, Any]]:
+    engine = _get_engine(db_url)
     with engine.connect() as conn:
         row = conn.execute(
             text(
@@ -258,23 +266,30 @@ def update_card_result(
                     last_error = :last_error,
                     last_run_at = NOW(),
                     updated_at = NOW()
-                WHERE id = :card_id AND dashboard_id = :dashboard_id
+                WHERE id = :card_id
+                  AND dashboard_id = (
+                      SELECT id FROM saved_dashboards
+                      WHERE id = :dashboard_id AND owner_user_id = :owner_user_id
+                  )
                 RETURNING *
                 """
             ),
             {
                 "dashboard_id": dashboard_id,
                 "card_id": card_id,
+                "owner_user_id": owner_user_id,
                 "last_result": _json_dumps(last_result),
                 "last_error": last_error,
             },
         ).fetchone()
+        if row is None:
+            conn.rollback()
+            return None
         conn.execute(
             text("UPDATE saved_dashboards SET updated_at = NOW() WHERE id = :dashboard_id"),
             {"dashboard_id": dashboard_id},
         )
         conn.commit()
-    engine.dispose()
     return _row_to_card(row)
 
 
