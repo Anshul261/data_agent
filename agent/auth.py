@@ -3,13 +3,20 @@ from sqlalchemy import create_engine, text
 from typing import Optional
 
 _ENGINE_KWARGS = {"pool_pre_ping": True, "pool_recycle": 1800}
+_ALLOWED_ROLES = {"admin", "user"}
 
 
 def hash_password(plain: str) -> str:
+    if len(plain) < 12:
+        raise ValueError("Password must be at least 12 characters long")
+    if len(plain.encode()) > 72:
+        raise ValueError("Password must be 72 bytes or fewer")
     return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
+    if len(plain.encode()) > 72:
+        return False
     return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
@@ -43,6 +50,11 @@ def get_user(username: str, db_url: str) -> Optional[dict]:
 
 
 def create_user(username: str, password: str, role: str, db_url: str) -> dict:
+    username = username.strip()
+    if not username or len(username) > 50:
+        raise ValueError("Username must be between 1 and 50 characters")
+    if role not in _ALLOWED_ROLES:
+        raise ValueError("Invalid user role")
     engine = create_engine(db_url, **_ENGINE_KWARGS)
     hashed = hash_password(password)
     with engine.connect() as conn:
@@ -60,6 +72,7 @@ def create_user(username: str, password: str, role: str, db_url: str) -> dict:
 
 
 def update_user_password(username: str, password: str, db_url: str) -> bool:
+    username = username.strip()
     engine = create_engine(db_url, **_ENGINE_KWARGS)
     hashed = hash_password(password)
     with engine.connect() as conn:
