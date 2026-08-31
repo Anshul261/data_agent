@@ -15,6 +15,7 @@ import clickhouse_connect
 import dashboard_store
 import jwt
 import request_context
+import sql_guard
 from agno.agent import Agent
 from agno.db.postgres import PostgresDb
 from agno.guardrails import PIIDetectionGuardrail, PromptInjectionGuardrail
@@ -160,40 +161,6 @@ DASHBOARD_CLICKHOUSE_MAX_RESULT_ROWS = env_int(
     "DASHBOARD_CLICKHOUSE_MAX_RESULT_ROWS", 5000
 )
 AGENT_TOOL_CALL_LIMIT = env_int("AGENT_TOOL_CALL_LIMIT", 12)
-READ_ONLY_PREFIXES = ("SELECT", "SHOW", "DESCRIBE", "DESC", "EXPLAIN")
-DISALLOWED_SQL_KEYWORDS = {
-    "ALTER",
-    "ATTACH",
-    "CREATE",
-    "DELETE",
-    "DETACH",
-    "DROP",
-    "GRANT",
-    "INSERT",
-    "KILL",
-    "OPTIMIZE",
-    "RENAME",
-    "REVOKE",
-    "SYSTEM",
-    "TRUNCATE",
-    "UPDATE",
-    "USE",
-}
-TABLE_REFERENCE_PATTERN = re.compile(
-    r"""(?ix)
-    \b(?:from|join)\s+
-    (
-        (?:
-            [`"]?[a-zA-Z_][\w]*[`"]?\.
-        )?
-        [`"]?[a-zA-Z_][\w]*[`"]?
-    )
-    """
-)
-
-
-def _normalize_identifier(identifier: str) -> str:
-    return identifier.replace("`", "").replace('"', "").strip().lower()
 
 
 def _resolve_allowed_table() -> tuple[str, str]:
@@ -219,130 +186,18 @@ def _resolve_allowed_table() -> tuple[str, str]:
 
 ALLOWED_TABLE_DATABASE, RESOLVED_ALLOWED_TABLE_NAME = _resolve_allowed_table()
 ALLOWED_TABLE_FQN = f"{ALLOWED_TABLE_DATABASE}.{RESOLVED_ALLOWED_TABLE_NAME}"
-ALLOWED_TABLE_IDENTIFIERS = {
-    _normalize_identifier(ALLOWED_TABLE_NAME),
-    _normalize_identifier(RESOLVED_ALLOWED_TABLE_NAME),
-    _normalize_identifier(ALLOWED_TABLE_FQN),
-}
+_sql_guard = sql_guard.SqlGuard(
+    configured_table_name=ALLOWED_TABLE_NAME,
+    resolved_table_name=RESOLVED_ALLOWED_TABLE_NAME,
+    table_fqn=ALLOWED_TABLE_FQN,
+)
 
-
-def _rewrite_allowed_table_references(sql_query: str) -> str:
-    pattern = re.compile(
-        rf"""(?ix)
-        (?<![\w.])
-        {re.escape(ALLOWED_TABLE_NAME)}
-        (?![\w])
-        """
-    )
-    return pattern.sub(ALLOWED_TABLE_FQN, sql_query)
-
-
-def _extract_referenced_tables(sql_query: str) -> set[str]:
-    return {
-        _normalize_identifier(match.group(1))
-        for match in TABLE_REFERENCE_PATTERN.finditer(sql_query)
-    }
-
-
-def _is_allowed_table(identifier: str) -> bool:
-    return _normalize_identifier(identifier) in ALLOWED_TABLE_IDENTIFIERS
-
-
-def _validate_read_only_query(sql_query: str) -> tuple[bool, str]:
-    stripped_query = sql_query.strip()
-    normalized_query = (
-        stripped_query[:-1].strip() if stripped_query.endswith(";") else stripped_query
-    )
-    if ";" in normalized_query:
-        return False, "Error: Only a single SQL statement is allowed."
-    if re.search(r"(?is)\bFORMAT\s+\w+\b", normalized_query):
-        return False, "Error: FORMAT clauses are not allowed."
-    if re.search(r"(?is)\bINTO\s+OUTFILE\b", normalized_query):
-        return False, "Error: Export clauses are not allowed."
-
-    query_upper = stripped_query.upper()
-
-    if not any(query_upper.startswith(prefix) for prefix in READ_ONLY_PREFIXES):
-        return (
-            False,
-            "Error: Only SELECT, SHOW, DESCRIBE, DESC, and EXPLAIN queries are allowed for safety.",
-        )
-
-    for keyword in DISALLOWED_SQL_KEYWORDS:
-        if re.search(rf"\b{keyword}\b", query_upper):
-            return (
-                False,
-                "Error: Mutating or administrative SQL statements are not allowed.",
-            )
-
-    if query_upper.startswith("SHOW TABLES"):
-        return True, ""
-
-    describe_match = re.match(
-        r"""(?ix)
-        \s*des(?:cribe|c)\s+(?:table\s+)?
-        (
-            (?:
-                [`"]?[a-zA-Z_][\w]*[`"]?\.
-            )?
-            [`"]?[a-zA-Z_][\w]*[`"]?
-        )
-        """,
-        stripped_query,
-    )
-    if describe_match:
-        if not _is_allowed_table(describe_match.group(1)):
-            return (
-                False,
-                f"Error: Only schema access for {RESOLVED_ALLOWED_TABLE_NAME} is allowed.",
-            )
-        return True, ""
-
-    referenced_tables = _extract_referenced_tables(stripped_query)
-    if not referenced_tables:
-        return (
-            False,
-            f"Error: Queries must read from {RESOLVED_ALLOWED_TABLE_NAME} only.",
-        )
-
-    disallowed_tables = sorted(
-        table_name
-        for table_name in referenced_tables
-        if not _is_allowed_table(table_name)
-    )
-    if disallowed_tables:
-        return (
-            False,
-            f"Error: Only {RESOLVED_ALLOWED_TABLE_NAME} is allowed. Blocked references: {', '.join(disallowed_tables)}.",
-        )
-
-    return True, ""
-
-
-def _validate_dashboard_query(sql_query: str) -> tuple[bool, str]:
-    stripped_query = sql_query.strip()
-    normalized_query = (
-        stripped_query[:-1].strip() if stripped_query.endswith(";") else stripped_query
-    )
-    query_upper = normalized_query.upper()
-
-    if ";" in normalized_query:
-        return False, "Only a single SQL statement is allowed."
-
-    if not query_upper.startswith("SELECT"):
-        return False, "Saved dashboard cards may only rerun SELECT queries."
-
-    if re.search(r"(?is)\bFORMAT\s+\w+\b", normalized_query):
-        return False, "FORMAT clauses are not allowed in saved dashboard queries."
-
-    if re.search(r"(?is)\bINTO\s+OUTFILE\b", normalized_query):
-        return False, "Export clauses are not allowed in saved dashboard queries."
-
-    is_valid, error_message = _validate_read_only_query(normalized_query)
-    if not is_valid:
-        return False, error_message
-
-    return True, ""
+# Thin delegations so existing call sites stay unchanged.
+_is_allowed_table = _sql_guard.is_allowed_table
+_rewrite_allowed_table_references = _sql_guard.rewrite_table_references
+_extract_referenced_tables = _sql_guard.extract_referenced_tables
+_validate_read_only_query = _sql_guard.validate_read_only
+_validate_dashboard_query = _sql_guard.validate_dashboard
 
 
 def _clickhouse_rows_as_dicts(sql_query: str) -> list[dict]:

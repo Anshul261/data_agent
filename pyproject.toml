@@ -30,3 +30,8 @@ dependencies = [
     "tomli>=2.3.0",
     "uvicorn>=0.38.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
