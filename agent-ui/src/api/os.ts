@@ -2,7 +2,13 @@ import { toast } from 'sonner'
 
 import { APIRoutes } from './routes'
 
-import { AgentDetails, Sessions, TeamDetails } from '@/types/os'
+import {
+  AgentDetails,
+  ChartArtifact,
+  SavedDashboard,
+  Sessions,
+  TeamDetails
+} from '@/types/os'
 
 // Helper function to create headers with optional auth token
 const createHeaders = (authToken?: string): HeadersInit => {
@@ -165,4 +171,94 @@ export const deleteTeamSessionAPI = async (
     throw new Error(`Failed to delete team session: ${response.statusText}`)
   }
   return response
+}
+
+export const createDashboardAPI = async (
+  base: string,
+  authToken: string,
+  payload: {
+    name: string
+    description?: string
+    source_session_id?: string | null
+    layout?: Array<Record<string, unknown>>
+    cards: Array<{
+      title: string
+      chart_type: ChartArtifact['chart_type']
+      sql: string
+      mapping?: ChartArtifact['mapping']
+      presentation?: ChartArtifact['presentation']
+      insight?: string
+      last_result: ChartArtifact['data']
+      position?: Record<string, unknown>
+    }>
+  }
+): Promise<SavedDashboard> => {
+  const response = await fetch(APIRoutes.Dashboards(base), {
+    method: 'POST',
+    headers: createHeaders(authToken),
+    body: JSON.stringify(payload)
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(
+      body?.detail || `Failed to save dashboard: ${response.statusText}`
+    )
+  }
+
+  return response.json()
+}
+
+export const listDashboardsAPI = async (
+  base: string,
+  authToken: string
+): Promise<SavedDashboard[]> => {
+  const response = await fetch(APIRoutes.Dashboards(base), {
+    method: 'GET',
+    headers: createHeaders(authToken)
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to load dashboards: ${response.statusText}`)
+  }
+
+  const body = await response.json()
+  return body.data ?? []
+}
+
+export const getDashboardAPI = async (
+  base: string,
+  authToken: string,
+  dashboardId: string
+): Promise<SavedDashboard> => {
+  const response = await fetch(APIRoutes.Dashboard(base, dashboardId), {
+    method: 'GET',
+    headers: createHeaders(authToken)
+  })
+
+  if (!response.ok) {
+    throw new Error(`Failed to load dashboard: ${response.statusText}`)
+  }
+
+  return response.json()
+}
+
+export const refreshDashboardAPI = async (
+  base: string,
+  authToken: string,
+  dashboardId: string
+): Promise<SavedDashboard> => {
+  const response = await fetch(APIRoutes.RefreshDashboard(base, dashboardId), {
+    method: 'POST',
+    headers: createHeaders(authToken)
+  })
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => null)
+    throw new Error(
+      body?.detail || `Failed to refresh dashboard: ${response.statusText}`
+    )
+  }
+
+  return response.json()
 }

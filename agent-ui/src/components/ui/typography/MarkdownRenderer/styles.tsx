@@ -5,6 +5,10 @@ import { FC, useState, useCallback } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { cn } from '@/lib/utils'
+import {
+  fetchAuthedImageBlob,
+  useAuthedImage
+} from '@/hooks/useAuthedImage'
 import { useStore } from '@/store'
 
 import type {
@@ -217,8 +221,11 @@ const Img = ({ src, alt }: ImgProps) => {
   const [error, setError] = useState(false)
   const [downloading, setDownloading] = useState(false)
   const { chatInputRef } = useStore()
+  const authToken = useStore((state) => state.authToken)
 
   const strSrc = typeof src === 'string' ? src : null
+  // Chart URLs need the bearer token, which an <img> tag cannot send.
+  const { src: resolvedSrc, error: authError } = useAuthedImage(strSrc)
 
   const handleDownload = useCallback(
     async (e: React.MouseEvent) => {
@@ -226,8 +233,7 @@ const Img = ({ src, alt }: ImgProps) => {
       if (!strSrc || downloading) return
       setDownloading(true)
       try {
-        const res = await fetch(strSrc)
-        const blob = await res.blob()
+        const blob = await fetchAuthedImageBlob(strSrc, authToken)
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
@@ -242,7 +248,7 @@ const Img = ({ src, alt }: ImgProps) => {
         setDownloading(false)
       }
     },
-    [strSrc, alt, downloading]
+    [strSrc, alt, downloading, authToken]
   )
 
   const handleModify = useCallback(
@@ -268,7 +274,7 @@ const Img = ({ src, alt }: ImgProps) => {
 
   return (
     <div className="group relative w-full max-w-xl">
-      {error ? (
+      {error || authError ? (
         <div className="flex h-40 flex-col items-center justify-center gap-2 rounded-md bg-secondary/50 text-muted">
           <Paragraph className="text-primary">Image unavailable</Paragraph>
           <Link
@@ -282,7 +288,7 @@ const Img = ({ src, alt }: ImgProps) => {
       ) : (
         <>
           <Image
-            src={strSrc}
+            src={resolvedSrc ?? strSrc}
             width={1280}
             height={720}
             alt={alt ?? 'Rendered image'}

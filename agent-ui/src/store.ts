@@ -127,10 +127,7 @@ export const useStore = create<Store>()(
       name: 'endpoint-storage',
       storage: createJSONStorage(() => localStorage),
       partialize: (state) => ({
-        selectedEndpoint: state.selectedEndpoint,
-        authToken: state.authToken,
-        username: state.username,
-        userRole: state.userRole
+        selectedEndpoint: state.selectedEndpoint
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated?.()

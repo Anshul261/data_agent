@@ -2,7 +2,7 @@
 import { Button } from '@/components/ui/button'
 import { useStore } from '@/store'
 import { motion, AnimatePresence } from 'framer-motion'
-import { useState, useEffect } from 'react'
+import { Suspense, useState, useEffect } from 'react'
 import Icon from '@/components/ui/icon'
 import { isValidUrl } from '@/lib/utils'
 import { toast } from 'sonner'
@@ -15,7 +15,7 @@ import { useAuthGuard } from '@/hooks/useAuthGuard'
 
 const ENDPOINT_PLACEHOLDER = 'NO ENDPOINT ADDED'
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   const router = useRouter()
   useAuthGuard()
 
@@ -389,5 +389,13 @@ export default function SettingsPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <SettingsPageContent />
+    </Suspense>
   )
 }

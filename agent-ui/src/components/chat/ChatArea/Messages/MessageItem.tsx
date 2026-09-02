@@ -7,6 +7,16 @@ import Images from './Multimedia/Images'
 import Audios from './Multimedia/Audios'
 import { memo } from 'react'
 import AgentThinkingLoader from './AgentThinkingLoader'
+import DashboardArtifactGroup from './DashboardArtifactGroup'
+import JsonRenderArtifactGroup from '@/components/render/JsonRenderArtifactGroup'
+import {
+  parseChartArtifacts,
+  stripChartArtifactBlocks
+} from '@/lib/chartArtifacts'
+import {
+  parseJsonRenderArtifacts,
+  stripJsonRenderBlocks
+} from '@/lib/renderArtifacts'
 
 interface MessageProps {
   message: ChatMessage
@@ -27,9 +37,26 @@ const AgentMessage = ({ message }: MessageProps) => {
       </p>
     )
   } else if (message.content) {
+    const jsonRenderArtifacts = parseJsonRenderArtifacts(message.content)
+    const chartArtifacts = parseChartArtifacts(message.content)
+    const visibleContent = stripChartArtifactBlocks(
+      stripJsonRenderBlocks(message.content)
+    )
+
     messageContent = (
       <div className="flex w-full flex-col gap-4">
-        <MarkdownRenderer>{message.content}</MarkdownRenderer>
+        {visibleContent && (
+          <MarkdownRenderer>{visibleContent}</MarkdownRenderer>
+        )}
+        {jsonRenderArtifacts.map((artifact) => (
+          <JsonRenderArtifactGroup
+            key={artifact.artifact_id ?? artifact.title}
+            artifact={artifact}
+          />
+        ))}
+        {jsonRenderArtifacts.length === 0 && chartArtifacts.length > 0 && (
+          <DashboardArtifactGroup artifacts={chartArtifacts} />
+        )}
         {message.videos && message.videos.length > 0 && (
           <Videos videos={message.videos} />
         )}

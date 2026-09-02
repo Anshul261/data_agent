@@ -54,7 +54,7 @@ export default function LoginPage() {
         return
       }
 
-      const data = await response.json() as {
+      const data = (await response.json()) as {
         access_token: string
         username: string
         role: 'admin' | 'user'
@@ -77,15 +77,18 @@ export default function LoginPage() {
     setIsRecovering(true)
 
     try {
-      const response = await fetch(APIRoutes.RecoverPassword(selectedEndpoint), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: recoveryUsername,
-          new_password: newPassword,
-          recovery_key: recoveryKey
-        })
-      })
+      const response = await fetch(
+        APIRoutes.RecoverPassword(selectedEndpoint),
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            username: recoveryUsername,
+            new_password: newPassword,
+            recovery_key: recoveryKey
+          })
+        }
+      )
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}))
@@ -95,7 +98,9 @@ export default function LoginPage() {
         return
       }
 
-      setRecoverySuccess('Password reset successful. Sign in with the new password.')
+      setRecoverySuccess(
+        'Password reset successful. Sign in with the new password.'
+      )
       setUsernameInput(recoveryUsername)
       setPassword(newPassword)
       setShowRecovery(false)
@@ -110,14 +115,16 @@ export default function LoginPage() {
     <div className="flex h-screen w-full items-center justify-center bg-background font-dmmono">
       <div className="w-full max-w-sm space-y-6 rounded-2xl border border-primary/15 bg-accent/30 p-8">
         <div className="space-y-1">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="mb-4 flex items-center gap-2">
             <Icon type="agent" size="xs" />
             <span className="text-xs font-medium uppercase text-white">
               Data Agent
             </span>
           </div>
-          <h1 className="text-xl font-medium text-foreground">Sign in</h1>
-          <p className="text-sm text-muted">Enter your credentials to continue</p>
+          <h1 className="text-foreground text-xl font-medium">Sign in</h1>
+          <p className="text-sm text-muted">
+            Enter your credentials to continue
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -132,7 +139,7 @@ export default function LoginPage() {
               placeholder="username"
               required
               autoFocus
-              className="flex h-11 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+              className="text-foreground flex h-11 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
             />
           </div>
 
@@ -146,7 +153,8 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              className="flex h-11 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+              maxLength={72}
+              className="text-foreground flex h-11 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
             />
           </div>
 
@@ -177,7 +185,7 @@ export default function LoginPage() {
                 setRecoveryUsername(usernameInput || 'admin')
               }
             }}
-            className="h-9 w-full rounded-xl text-xs font-medium uppercase text-muted hover:text-foreground"
+            className="hover:text-foreground h-9 w-full rounded-xl text-xs font-medium uppercase text-muted"
           >
             {showRecovery ? 'Hide Recovery' : 'Forgot Password?'}
           </Button>
@@ -193,7 +201,7 @@ export default function LoginPage() {
                   value={recoveryUsername}
                   onChange={(e) => setRecoveryUsername(e.target.value)}
                   required
-                  className="flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                  className="text-foreground flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
                 />
               </div>
 
@@ -205,10 +213,11 @@ export default function LoginPage() {
                   type="password"
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  placeholder="At least 8 characters"
+                  placeholder="At least 12 characters"
                   required
-                  minLength={8}
-                  className="flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                  minLength={12}
+                  maxLength={72}
+                  className="text-foreground flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
                 />
               </div>
 
@@ -222,7 +231,7 @@ export default function LoginPage() {
                   onChange={(e) => setRecoveryKey(e.target.value)}
                   placeholder="AUTH_RECOVERY_KEY"
                   required
-                  className="flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium text-foreground placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
+                  className="text-foreground flex h-10 w-full rounded-xl border border-primary/15 bg-background px-4 text-sm font-medium placeholder:text-muted/50 focus:outline-none focus:ring-1 focus:ring-primary/30"
                 />
               </div>
 
@@ -235,7 +244,10 @@ export default function LoginPage() {
               <Button
                 type="submit"
                 disabled={
-                  isRecovering || !recoveryUsername || !newPassword || !recoveryKey
+                  isRecovering ||
+                  !recoveryUsername ||
+                  !newPassword ||
+                  !recoveryKey
                 }
                 variant="outline"
                 className="h-10 w-full rounded-xl text-xs font-medium uppercase"

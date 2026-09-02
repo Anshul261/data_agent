@@ -15,6 +15,11 @@ export const APIRoutes = {
   DeleteTeamSession: (agentOSUrl: string, teamId: string, sessionId: string) =>
     `${agentOSUrl}/v1//teams/${teamId}/sessions/${sessionId}`,
   LoadKnowledge: (agentOSUrl: string) => `${agentOSUrl}/api/knowledge/load`,
+  Dashboards: (agentOSUrl: string) => `${agentOSUrl}/api/dashboards`,
+  Dashboard: (agentOSUrl: string, dashboardId: string) =>
+    `${agentOSUrl}/api/dashboards/${dashboardId}`,
+  RefreshDashboard: (agentOSUrl: string, dashboardId: string) =>
+    `${agentOSUrl}/api/dashboards/${dashboardId}/refresh`,
   Login: (agentOSUrl: string) => `${agentOSUrl}/auth/login`,
   RecoverPassword: (agentOSUrl: string) => `${agentOSUrl}/auth/recover`
 }

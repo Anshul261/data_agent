@@ -27,6 +27,7 @@ npm run validate      # Run all checks (lint + format + typecheck)
 ```bash
 # Uses uv for dependency management
 uv run python agent/agent.py   # Start agent server on port 7777
+uv run pytest tests/           # Run backend tests
 ```
 
 ## Architecture

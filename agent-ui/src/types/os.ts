@@ -1,3 +1,5 @@
+import type { VisibilityCondition } from '@json-render/core'
+
 export interface ToolCall {
   role: 'user' | 'tool' | 'system' | 'assistant'
   content: string | null
@@ -231,6 +233,90 @@ export interface TeamDetails {
 export interface ImageData {
   revised_prompt: string
   url: string
+}
+
+export type ChartArtifactType = 'metric' | 'line' | 'bar' | 'pie' | 'table'
+
+export interface ChartArtifact {
+  kind: 'chart_artifact'
+  version: 1
+  artifact_id?: string
+  title: string
+  chart_type: ChartArtifactType
+  data: Array<Record<string, string | number | boolean | null>>
+  mapping?: {
+    x?: string
+    y?: string
+    label?: string
+    value?: string
+    series?: string
+  }
+  query?: {
+    sql?: string
+    explanation?: string
+  }
+  insight?: string
+  presentation?: {
+    color_scheme?: string
+    show_legend?: boolean
+    show_tooltip?: boolean
+  }
+}
+
+export interface JsonRenderElement {
+  type: string
+  props: Record<string, unknown>
+  children?: string[]
+  visible?: VisibilityCondition
+}
+
+export interface JsonRenderSpec extends Record<string, unknown> {
+  root: string
+  elements: Record<string, JsonRenderElement>
+  state?: Record<string, unknown>
+}
+
+export interface JsonRenderArtifact extends Record<string, unknown> {
+  kind: 'json_render'
+  version: 1
+  artifact_id?: string
+  title: string
+  mode?: 'dashboard' | 'report'
+  spec: JsonRenderSpec
+  cards?: ChartArtifact[]
+  queries?: Array<{
+    id?: string
+    sql?: string
+    explanation?: string
+  }>
+}
+
+export interface SavedDashboardCard {
+  id: string
+  dashboard_id: string
+  title: string
+  chart_type: ChartArtifactType
+  sql: string
+  mapping?: ChartArtifact['mapping']
+  presentation?: ChartArtifact['presentation']
+  insight?: string | null
+  last_result: ChartArtifact['data']
+  last_error?: string | null
+  last_run_at?: string | null
+  position?: Record<string, unknown>
+}
+
+export interface SavedDashboard {
+  id: string
+  owner_user_id: string
+  name: string
+  description?: string | null
+  source_session_id?: string | null
+  layout: Array<Record<string, unknown>>
+  cards?: SavedDashboardCard[]
+  card_count?: number
+  created_at?: string | null
+  updated_at?: string | null
 }
 
 export interface VideoData {

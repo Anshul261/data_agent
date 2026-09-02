@@ -6,7 +6,17 @@ from typing import Any, Dict, List, Optional, Union
 
 from agno.tools import Toolkit
 from agno.utils.log import log_info, logger
-from sqlalchemy import Column, DateTime, LargeBinary, String, create_engine
+
+from request_context import get_current_user_id
+from sqlalchemy import (
+    Column,
+    DateTime,
+    LargeBinary,
+    String,
+    create_engine,
+    inspect,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Session
 
 
@@ -18,6 +28,7 @@ class _Chart(_Base):
     __tablename__ = "charts"
 
     id = Column(String(36), primary_key=True)
+    owner_user_id = Column(String(36), index=True)
     chart_type = Column(String(50), nullable=False)
     title = Column(String(500), nullable=False)
     image_data = Column(LargeBinary, nullable=False)
@@ -34,6 +45,8 @@ class VisualizationTools(Toolkit):
         enable_create_pie_chart: bool = True,
         enable_create_scatter_plot: bool = True,
         enable_create_histogram: bool = True,
+        enable_create_chart_artifact: bool = True,
+        enable_create_json_render_artifact: bool = True,
         all: bool = False,
         **kwargs,
     ):
@@ -51,6 +64,7 @@ class VisualizationTools(Toolkit):
             pool_recycle=1800,    # recycle connections every 30 min
         )
         _Base.metadata.create_all(self._engine)
+        self._ensure_owner_column()
 
         tools: List[Any] = []
         if enable_create_bar_chart or all:
@@ -63,8 +77,37 @@ class VisualizationTools(Toolkit):
             tools.append(self.create_scatter_plot)
         if enable_create_histogram or all:
             tools.append(self.create_histogram)
+        if enable_create_chart_artifact or all:
+            tools.append(self.create_chart_artifact)
+        if enable_create_json_render_artifact or all:
+            tools.append(self.create_json_render_artifact)
 
         super().__init__(name="visualization_tools", tools=tools, **kwargs)
+
+    def _ensure_owner_column(self) -> None:
+        """
+        Add owner_user_id to a charts table created before ownership existed.
+
+        Pre-existing rows keep a NULL owner and are therefore unreachable
+        over HTTP, which is the intended outcome: their owner is unknowable,
+        so they cannot be safely served to anyone.
+        """
+        columns = {
+            column["name"] for column in inspect(self._engine).get_columns("charts")
+        }
+        if "owner_user_id" in columns:
+            return
+
+        with self._engine.begin() as conn:
+            conn.execute(
+                text("ALTER TABLE charts ADD COLUMN owner_user_id VARCHAR(36)")
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_charts_owner "
+                    "ON charts(owner_user_id)"
+                )
+            )
 
     def _apply_style(self):
         import matplotlib.pyplot as plt
@@ -86,6 +129,7 @@ class VisualizationTools(Toolkit):
         chart_id = str(uuid.uuid4())
         chart = _Chart(
             id=chart_id,
+            owner_user_id=get_current_user_id(),
             chart_type=chart_type,
             title=title,
             image_data=png_bytes,
@@ -98,14 +142,30 @@ class VisualizationTools(Toolkit):
     def _get_chart_url(self, chart_id: str) -> str:
         return f"{self.base_url}/api/charts/{chart_id}"
 
-    def get_chart_bytes(self, chart_id: str) -> Optional[bytes]:
-        """Retrieve chart PNG bytes by ID. Returns None if not found."""
+    def get_chart_bytes(self, chart_id: str, owner_user_id: str) -> Optional[bytes]:
+        """
+        Retrieve chart PNG bytes for one owner.
+
+        Returns None when the chart does not exist or belongs to someone
+        else, so callers cannot distinguish the two cases.
+        """
+        if not owner_user_id:
+            return None
         try:
             with Session(self._engine) as session:
-                chart = session.get(_Chart, chart_id)
+                chart = (
+                    session.query(_Chart)
+                    .filter(
+                        _Chart.id == chart_id,
+                        _Chart.owner_user_id == owner_user_id,
+                    )
+                    .first()
+                )
                 if chart:
                     return bytes(chart.image_data)
-                logger.warning(f"Chart {chart_id} not found in database")
+                logger.warning(
+                    f"Chart {chart_id} not found for the requesting user"
+                )
                 return None
         except Exception as e:
             logger.error(f"Error retrieving chart {chart_id}: {e}")
@@ -143,6 +203,268 @@ class VisualizationTools(Toolkit):
                 return {f"Item {i + 1}": float(v) if isinstance(v, (int, float)) else 0 for i, v in enumerate(data)}
 
         return {"Data": 1.0}
+
+    def _normalize_data_for_artifacts(
+        self, data: Union[Dict[str, Any], List[Dict[str, Any]], List[Any], str]
+    ) -> List[Dict[str, Any]]:
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except json.JSONDecodeError:
+                return [{"label": "Data", "value": data}]
+
+        if isinstance(data, dict):
+            return [{"label": str(key), "value": value} for key, value in data.items()]
+
+        if isinstance(data, list):
+            rows: List[Dict[str, Any]] = []
+            for index, item in enumerate(data):
+                if isinstance(item, dict):
+                    rows.append({str(key): value for key, value in item.items()})
+                else:
+                    rows.append({"label": f"Item {index + 1}", "value": item})
+            return rows
+
+        return [{"label": "Data", "value": data}]
+
+    def create_chart_artifact(
+        self,
+        data: Union[Dict[str, Any], List[Dict[str, Any]], List[Any], str],
+        chart_type: str,
+        title: str,
+        x_field: str = "",
+        y_field: str = "",
+        label_field: str = "",
+        value_field: str = "",
+        insight: str = "",
+        sql: str = "",
+        explanation: str = "",
+    ) -> str:
+        """
+        Create an interactive dashboard-quality chart artifact for the UI.
+
+        Use this after querying data from ClickHouse when the user asks for a
+        chart, visualization, metric, table, or dashboard component. Include
+        the returned chart-artifact block exactly in your final response.
+
+        Args:
+            data: Query result rows, a dictionary, or a JSON string.
+            chart_type: One of metric, line, bar, pie, or table.
+            title: Clear dashboard card title.
+            x_field: Field for x-axis on line/bar charts.
+            y_field: Numeric field for y-axis on line/bar charts.
+            label_field: Label/category field for pie/metric charts.
+            value_field: Numeric value field for pie/metric charts.
+            insight: One short interpretation of the chart.
+            sql: SQL used to produce the data, if available.
+            explanation: Short description of what the query measures.
+
+        Returns:
+            str: A fenced chart-artifact JSON block that the UI renders with ECharts.
+        """
+        allowed_types = {"metric", "line", "bar", "pie", "table"}
+        normalized_chart_type = chart_type.strip().lower()
+        if normalized_chart_type not in allowed_types:
+            normalized_chart_type = "bar"
+
+        rows = self._normalize_data_for_artifacts(data)
+        fields = list(rows[0].keys()) if rows else []
+
+        inferred_label = label_field or x_field or (fields[0] if fields else "label")
+        inferred_value = value_field or y_field or (fields[1] if len(fields) > 1 else inferred_label)
+
+        artifact = {
+            "kind": "chart_artifact",
+            "version": 1,
+            "artifact_id": str(uuid.uuid4()),
+            "title": title,
+            "chart_type": normalized_chart_type,
+            "data": rows,
+            "mapping": {
+                "x": x_field or inferred_label,
+                "y": y_field or inferred_value,
+                "label": inferred_label,
+                "value": inferred_value,
+            },
+            "query": {
+                "sql": sql,
+                "explanation": explanation,
+            },
+            "insight": insight,
+            "presentation": {
+                "show_legend": normalized_chart_type == "pie",
+                "show_tooltip": True,
+            },
+        }
+
+        return "```chart-artifact\n" + json.dumps(artifact, indent=2, default=str) + "\n```"
+
+    def create_json_render_artifact(
+        self,
+        cards: Union[List[Dict[str, Any]], str],
+        title: str,
+        mode: str = "dashboard",
+        subtitle: str = "",
+        narrative: str = "",
+    ) -> str:
+        """
+        Create a dynamic json-render dashboard or report artifact for the UI.
+
+        Prefer this when users ask for dashboards, reports, PDFs, or multiple
+        visual components. The Next.js UI renders the returned json-render block
+        using a local component catalog, including Apache ECharts components.
+
+        Args:
+            cards: A list of card dictionaries, or a JSON string containing one.
+                Each card MUST follow this contract:
+                {
+                  "title": "Card title",
+                  "chart_type": "metric|line|bar|pie|table",
+                  "data": [{"field": "value"}],
+                  "mapping": {"x": "field", "y": "numeric_field", "label": "field", "value": "numeric_field"},
+                  "query": {"sql": "SELECT ...", "explanation": "What this measures"},
+                  "insight": "One short interpretation",
+                  "presentation": {"show_legend": false, "show_tooltip": true}
+                }
+            title: Dashboard/report title.
+            mode: Either dashboard or report.
+            subtitle: Optional subtitle shown under the title.
+            narrative: Optional markdown narrative rendered near the top.
+
+        Returns:
+            str: A fenced json-render JSON block rendered by the Next.js UI.
+        """
+        if isinstance(cards, str):
+            try:
+                cards = json.loads(cards)
+            except json.JSONDecodeError:
+                cards = []
+
+        if not isinstance(cards, list):
+            cards = []
+
+        normalized_mode = mode.strip().lower()
+        if normalized_mode not in {"dashboard", "report"}:
+            normalized_mode = "dashboard"
+
+        artifact_id = str(uuid.uuid4())
+        root_id = f"{normalized_mode}-{artifact_id}"
+        elements: Dict[str, Dict[str, Any]] = {
+            root_id: {
+                "type": "Report" if normalized_mode == "report" else "Dashboard",
+                "props": {
+                    "title": title,
+                    "subtitle": subtitle or (
+                        "Generated analytics report"
+                        if normalized_mode == "report"
+                        else "Generated analytics dashboard"
+                    ),
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                "children": [],
+            }
+        }
+
+        if narrative:
+            narrative_id = f"narrative-{artifact_id}"
+            elements[narrative_id] = {
+                "type": "MarkdownText",
+                "props": {"content": narrative},
+            }
+            elements[root_id]["children"].append(narrative_id)
+
+        metric_ids: List[str] = []
+        visual_ids: List[str] = []
+        artifact_cards: List[Dict[str, Any]] = []
+        allowed_types = {"metric", "line", "bar", "pie", "table"}
+
+        for index, raw_card in enumerate(cards):
+            if not isinstance(raw_card, dict):
+                continue
+
+            chart_type = str(raw_card.get("chart_type") or "bar").strip().lower()
+            if chart_type not in allowed_types:
+                chart_type = "bar"
+
+            rows = self._normalize_data_for_artifacts(raw_card.get("data") or [])
+            fields = list(rows[0].keys()) if rows else []
+            mapping = raw_card.get("mapping") if isinstance(raw_card.get("mapping"), dict) else {}
+            label = mapping.get("label") or mapping.get("x") or (fields[0] if fields else "label")
+            value = mapping.get("value") or mapping.get("y") or (fields[1] if len(fields) > 1 else label)
+            normalized_mapping = {
+                "x": mapping.get("x") or label,
+                "y": mapping.get("y") or value,
+                "label": label,
+                "value": value,
+            }
+
+            card_id = str(raw_card.get("artifact_id") or uuid.uuid4())
+            title_value = str(raw_card.get("title") or f"Card {index + 1}")
+            card = {
+                "kind": "chart_artifact",
+                "version": 1,
+                "artifact_id": card_id,
+                "title": title_value,
+                "chart_type": chart_type,
+                "data": rows,
+                "mapping": normalized_mapping,
+                "query": raw_card.get("query") if isinstance(raw_card.get("query"), dict) else {},
+                "insight": str(raw_card.get("insight") or ""),
+                "presentation": raw_card.get("presentation") if isinstance(raw_card.get("presentation"), dict) else {},
+            }
+            artifact_cards.append(card)
+
+            element_type = "Metric" if chart_type == "metric" else "DataTable" if chart_type == "table" else "EChart"
+            element_id = f"{element_type.lower()}-{card_id}"
+            elements[element_id] = {
+                "type": element_type,
+                "props": card,
+            }
+            if chart_type == "metric":
+                metric_ids.append(element_id)
+            else:
+                visual_ids.append(element_id)
+
+        if metric_ids:
+            metric_grid_id = f"metrics-{artifact_id}"
+            elements[metric_grid_id] = {
+                "type": "Grid",
+                "props": {"columns": min(4, max(1, len(metric_ids)))},
+                "children": metric_ids,
+            }
+            elements[root_id]["children"].append(metric_grid_id)
+
+        if visual_ids:
+            visual_grid_id = f"visuals-{artifact_id}"
+            elements[visual_grid_id] = {
+                "type": "Grid",
+                "props": {"columns": 1 if normalized_mode == "report" else 2},
+                "children": visual_ids,
+            }
+            elements[root_id]["children"].append(visual_grid_id)
+
+        artifact = {
+            "kind": "json_render",
+            "version": 1,
+            "artifact_id": artifact_id,
+            "title": title,
+            "mode": normalized_mode,
+            "spec": {
+                "root": root_id,
+                "elements": elements,
+            },
+            "cards": artifact_cards,
+            "queries": [
+                {
+                    "id": card["artifact_id"],
+                    "sql": card.get("query", {}).get("sql", ""),
+                    "explanation": card.get("query", {}).get("explanation", ""),
+                }
+                for card in artifact_cards
+            ],
+        }
+
+        return "```json-render\n" + json.dumps(artifact, indent=2, default=str) + "\n```"
 
     def create_bar_chart(
         self,
